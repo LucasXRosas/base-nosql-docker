@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # iniciar.sh — Sobe todos os bancos NoSQL, UIs e a aplicação Express
-#             (com limpeza prévia automática de portas para evitar conflitos no Ubuntu)
+#             (com limpeza prévia automática de portas e carga dos arquivos declarativos em init/)
 #
 set -e
 
@@ -22,7 +22,6 @@ APP_PORTS=(3400 8400 8401 8402 27034 6334 9234)
 echo -e "${CYAN}Verificando e liberando portas para evitar conflitos no Ubuntu...${NC}"
 
 for port in "${APP_PORTS[@]}"; do
-    # Tenta liberar processos ocupando a porta com fuser ou lsof
     if command -v fuser >/dev/null 2>&1; then
         fuser -k -n tcp "$port" >/dev/null 2>&1 || true
     elif command -v lsof >/dev/null 2>&1; then
@@ -46,6 +45,18 @@ else
     sudo docker compose up -d --build --remove-orphans
 fi
 
+# ── Executar comandos declarativos do Redis em init/redis-init.commands ───────
+if [[ -f "$SCRIPT_DIR/init/redis-init.commands" ]]; then
+    echo -e "${CYAN}Carregando estruturas declarativas no Redis (init/redis-init.commands)...${NC}"
+    for i in {1..10}; do
+        if docker exec nosql_redis redis-cli ping >/dev/null 2>&1; then
+            docker exec -i nosql_redis redis-cli < "$SCRIPT_DIR/init/redis-init.commands" >/dev/null 2>&1 || true
+            break
+        fi
+        sleep 1
+    done
+fi
+
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║             🚀 AMBIENTE NOSQL ATIVO E PRONTO!                    ║${NC}"
@@ -60,8 +71,9 @@ echo -e "║  • ElasticVue (Elasticsearch):     ${CYAN}http://localhost:8400${
 echo -e "║  • Mongo Express (MongoDB):        ${CYAN}http://localhost:8401${NC}          ║"
 echo -e "║  • Redis Commander (Redis):        ${CYAN}http://localhost:8402${NC}          ║"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
-echo -e "║  ${BOLD}💡 DICA PARA OS ALUNOS:${NC}                                        ║"
-echo -e "║  Edite qualquer arquivo em ${CYAN}app/src/${NC} no VS Code e o servidor       ║"
-echo -e "║  reinicia automaticamente em tempo real (Hot-Reload).            ║"
+echo -e "║  ${BOLD}📁 ARQUIVOS DECLARATIVOS (Database as Code):${NC}                   ║"
+echo -e "║  • MongoDB:       ${CYAN}init/mongo-init.js${NC}                              ║"
+echo -e "║  • Elasticsearch: ${CYAN}init/elastic-init.json${NC}                          ║"
+echo -e "║  • Redis:         ${CYAN}init/redis-init.commands${NC}                        ║"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""

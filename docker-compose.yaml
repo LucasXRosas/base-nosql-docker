@@ -15,6 +15,7 @@ services:
       - ELASTICSEARCH_NODE=http://elasticsearch:9200
     volumes:
       - ./app/src:/app/src
+      - ./init:/app/init:ro
     depends_on:
       - mongo
       - redis
@@ -35,7 +36,7 @@ services:
       - mongo_data:/data/db
       - mongo_logs:/var/log/mongodb
       - ./mongod.conf:/etc/mongod.conf:ro
-      - ./init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - ./init/mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
     restart: unless-stopped
 
   mongo-express:

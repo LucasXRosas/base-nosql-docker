@@ -1,28 +1,26 @@
+import fs from "fs";
+import path from "path";
 import { connectMongo, getCollection, closeMongo } from "../database/mongo.js";
 import { connectElastic, getElasticClient, closeElastic } from "../database/elastic.js";
 
-export async function seedElasticsearch(keepConnectionsOpen = false) {
-  console.log("[Elasticsearch] Verificando/sincronizando índice 'pratos' com o MongoDB...");
+function getElasticInitConfig() {
+  // Procura o arquivo init/elastic-init.json
+  const possiblePaths = [
+    path.resolve(process.cwd(), "init", "elastic-init.json"),
+    path.resolve(process.cwd(), "..", "init", "elastic-init.json"),
+    path.resolve("/app", "init", "elastic-init.json"),
+  ];
 
-  await connectMongo();
-  await connectElastic();
-
-  const elastic = getElasticClient();
-  const indexName = "pratos";
-
-  // 1. Recria o índice com mapeamento otimizado para busca textual em português
-  const indexExists = await elastic.indices.exists({ index: indexName });
-  if (indexExists) {
-    console.log(`[Elasticsearch] Índice '${indexName}' já existe. Recriando...`);
-    await elastic.indices.delete({ index: indexName });
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, "utf-8");
+      return JSON.parse(raw);
+    }
   }
 
-  await elastic.indices.create({
-    index: indexName,
-    settings: {
-      number_of_shards: 1,
-      number_of_replicas: 0,
-    },
+  // Fallback padrão se não encontrar o arquivo
+  return {
+    settings: { number_of_shards: 1, number_of_replicas: 0 },
     mappings: {
       properties: {
         prato_id: { type: "keyword" },
@@ -37,6 +35,30 @@ export async function seedElasticsearch(keepConnectionsOpen = false) {
         disponivel: { type: "boolean" },
       },
     },
+  };
+}
+
+export async function seedElasticsearch(keepConnectionsOpen = false) {
+  console.log("[Elasticsearch] Verificando/sincronizando índice 'pratos' a partir de init/elastic-init.json...");
+
+  await connectMongo();
+  await connectElastic();
+
+  const elastic = getElasticClient();
+  const indexName = "pratos";
+  const initConfig = getElasticInitConfig();
+
+  // 1. Recria o índice com base no arquivo declarativo init/elastic-init.json
+  const indexExists = await elastic.indices.exists({ index: indexName });
+  if (indexExists) {
+    console.log(`[Elasticsearch] Índice '${indexName}' já existe. Recriando...`);
+    await elastic.indices.delete({ index: indexName });
+  }
+
+  await elastic.indices.create({
+    index: indexName,
+    settings: initConfig.settings,
+    mappings: initConfig.mappings,
   });
 
   // 2. Busca todos os pratos no MongoDB GastroHub
@@ -84,7 +106,7 @@ export async function seedElasticsearch(keepConnectionsOpen = false) {
   }
 }
 
-// Execução direta via CLI: npm run seed:elastic
+// Execução direta via CLI
 if (process.argv[1] && process.argv[1].includes("seed-elastic")) {
   seedElasticsearch().catch((err) => {
     console.error("Erro ao popular Elasticsearch:", err);

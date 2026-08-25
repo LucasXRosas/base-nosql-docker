@@ -122,6 +122,29 @@ Ao salvar o arquivo (`Ctrl + S`), teste em: `http://localhost:3400/api/itens/cat
 
 ---
 
+## 📁 Como Configurar e Inicializar os Bancos (*Database as Code*)
+
+Para que o professor e seus colegas consigam avaliar sua modelagem ao clonar seu fork, **todas as configurações de banco devem ser versionadas em arquivos na pasta `init/`**:
+
+```
+init/
+├── mongo-init.js          # MongoDB: coleções, validações, createIndex e dados iniciais
+├── elastic-init.json      # Elasticsearch: mappings, tipos (text/keyword) e analyzers
+└── redis-init.commands    # Redis: chaves de configuração, Hashes, Sets e Rankings
+```
+
+1. **MongoDB (`init/mongo-init.js`):**
+   - Escreva seus comandos `db.createCollection()`, `db.colecao.createIndex(...)` e `db.colecao.insertMany([...])`.
+   - Executado automaticamente na primeira inicialização do container.
+2. **Elasticsearch (`init/elastic-init.json`):**
+   - Defina os `mappings` e `properties` do seu índice para buscas por relevância e filtros.
+   - Sincronizado automaticamente pela aplicação ao iniciar.
+3. **Redis (`init/redis-init.commands`):**
+   - Escreva seus comandos Redis (`HSET`, `SADD`, `ZADD`, `SET`) para criar chaves, configurações e rankings iniciais.
+   - Executado automaticamente pelo script `./iniciar.sh`.
+
+---
+
 ## 🛠️ Comandos de Manutenção
 
 - **Ver logs da aplicação em tempo real:**
