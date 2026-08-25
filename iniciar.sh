@@ -56,7 +56,7 @@ echo -e "║  • Health Check dos 3 bancos:      ${CYAN}http://localhost:3400/a
 echo -e "║  • Simple Collection (GET):        ${CYAN}http://localhost:3400/api/itens${NC}  ║"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
 echo -e "║  ${BOLD}INTERFACES VISUAIS (WEB):${NC}                                      ║"
-echo -e "║  • ElasticVue (Elasticsearch):     ${CYAN}http://localhost:8400${NC}          ║"
+echo -e "║  • ElasticVue (Elasticsearch):     ${CYAN}http://localhost:8400${NC} (Use http://localhost:9234) ║"
 echo -e "║  • Mongo Express (MongoDB):        ${CYAN}http://localhost:8401${NC}          ║"
 echo -e "║  • Redis Commander (Redis):        ${CYAN}http://localhost:8402${NC}          ║"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
