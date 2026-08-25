@@ -4,31 +4,6 @@ Ambiente integrado com **Docker**, **MongoDB**, **Redis**, **Elasticsearch**, in
 
 ---
 
-## 🏗️ Visão Geral da Arquitetura do Ambiente
-
-```mermaid
-flowchart TD
-    subgraph DockerCompose ["Docker Compose (Tudo sobe junto!)"]
-        App["Aplicação Starter Express + TS\n(Porta 3400 | Hot-Reload via Volume)"]
-        Mongo[("MongoDB 7\n(Porta 27034)\nDataset GastroHub")]
-        Redis[("Redis 7 (RAM)\n(Porta 6334)\nCache & Sessão")]
-        Elastic[("Elasticsearch 8\n(Porta 9234)\nBusca Textual & Fuzzy")]
-        ME["Mongo Express (Porta 8401)"]
-        RC["Redis Commander (Porta 8402)"]
-        EV["ElasticVue (Porta 8400)"]
-    end
-
-    App -->|Conexão Nativa| Mongo
-    App -->|Cache-Aside < 2ms| Redis
-    App -->|Busca Relevância| Elastic
-
-    ME -.->|Gerencia| Mongo
-    RC -.->|Gerencia| Redis
-    EV -.->|Gerencia| Elastic
-```
-
----
-
 ## ⚡ Passo 1: Instalação e Configuração do Docker (Apenas 1 vez por máquina)
 
 Se você está em um computador do laboratório ou no seu notebook com **Ubuntu / Linux Mint**, execute o instalador automatizado que configura todas as permissões de usuário:
