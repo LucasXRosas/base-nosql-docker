@@ -1,0 +1,14 @@
+cluster.name: "docker-cluster"
+network.host: 0.0.0.0
+
+# ── CORS Configuration (Permite conexões do ElasticVue e Navegadores) ─────────
+http.cors.enabled: true
+http.cors.allow-origin: "*"
+http.cors.allow-methods: OPTIONS, HEAD, GET, POST, PUT, DELETE
+http.cors.allow-headers: X-Requested-With, X-Auth-Token, Content-Type, Content-Length, Authorization, Accept, User-Agent, X-Elastic-Client-Meta
+http.cors.allow-credentials: true
+
+# ── Desabilita autenticação SSL para ambiente de desenvolvimento local ─────────
+xpack.security.enabled: false
+xpack.security.http.ssl.enabled: false
+xpack.security.transport.ssl.enabled: false

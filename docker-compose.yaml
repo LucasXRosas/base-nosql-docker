@@ -80,19 +80,12 @@ services:
     container_name: nosql_elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
-      - xpack.security.http.ssl.enabled=false
-      - xpack.security.transport.ssl.enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      # Habilitar CORS para permitir que o ElasticVue (no navegador) conecte no Elasticsearch
-      - "http.cors.enabled=true"
-      - "http.cors.allow-origin=*"
-      - "http.cors.allow-headers=X-Requested-With,Content-Type,Content-Length,Authorization,Accept,User-Agent,X-Elastic-Client-Meta"
-      - "http.cors.allow-credentials=true"
     ports:
       - "9234:9200"
     volumes:
       - elastic_data:/usr/share/elasticsearch/data
+      - ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
     restart: unless-stopped
 
   elasticvue:
