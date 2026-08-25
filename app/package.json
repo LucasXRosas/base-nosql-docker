@@ -1,0 +1,31 @@
+{
+  "name": "nosql-starter-app",
+  "version": "1.0.0",
+  "description": "Aplicação Starter para a disciplina de Banco de Dados NoSQL — UTFPR",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "seed:elastic": "tsx src/scripts/seed-elastic.ts"
+  },
+  "keywords": ["nosql", "mongodb", "redis", "elasticsearch", "utfpr"],
+  "author": "Prof. Marcelo Vichar",
+  "license": "MIT",
+  "dependencies": {
+    "@elastic/elasticsearch": "^8.13.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ioredis": "^5.4.1",
+    "mongodb": "^6.5.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.7",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}
