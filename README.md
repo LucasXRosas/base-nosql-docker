@@ -4,7 +4,7 @@ Ambiente integrado com **Docker**, **MongoDB**, **Redis**, **Elasticsearch**, in
 
 ---
 
-## ⚡ Passo 1: Instalação e Configuração do Docker (Apenas 1 vez por máquina)
+## Passo 1: Instalação e Configuração do Docker (Apenas 1 vez por máquina)
 
 Se você está em um computador do laboratório ou no seu notebook com **Ubuntu / Linux Mint**, execute o instalador automatizado que configura todas as permissões de usuário:
 
@@ -16,7 +16,7 @@ chmod +x *.sh
 ./setup.sh
 ```
 
-### 🔑 Como funciona a permissão sem `sudo` no Ubuntu:
+### Como funciona a permissão sem `sudo` no Ubuntu:
 O script adiciona seu usuário ao grupo `docker` e ajusta as permissões do socket `/var/run/docker.sock`.
 - **Se abrir um novo terminal e der erro de permissão**, basta rodar uma única vez:
   ```bash
@@ -26,7 +26,7 @@ O script adiciona seu usuário ao grupo `docker` e ajusta as permissões do sock
 
 ---
 
-## 🚀 Passo 2: Subir o Ambiente Completo com 1 Comando
+## Passo 2: Subir o Ambiente Completo com 1 Comando
 
 Para subir todos os bancos, interfaces web **E** a aplicação Node/TypeScript juntos:
 
@@ -39,7 +39,7 @@ Para subir todos os bancos, interfaces web **E** a aplicação Node/TypeScript j
 
 ---
 
-## 🌐 Painéis e Acessos Web (Portas Dedicadas TSI34E)
+## Painéis e Acessos Web (Portas Dedicadas TSI34E)
 
 Para evitar conflitos com outros programas locais do Ubuntu, utilizamos portas dedicadas:
 
@@ -55,7 +55,7 @@ Para evitar conflitos com outros programas locais do Ubuntu, utilizamos portas d
 
 ---
 
-## 📡 Endpoints Prontos para Testar (RetroVault — Checkpoint 1)
+## Endpoints Prontos para Testar (RetroVault — Checkpoint 1)
 
 - **Health Check dos 3 Bancos:** [http://localhost:3400/api/health](http://localhost:3400/api/health)
 - **1. Vitrine de Destaques (Nota >= 4.5):** [http://localhost:3400/api/jogos/destaques](http://localhost:3400/api/jogos/destaques)
@@ -69,11 +69,11 @@ Para evitar conflitos com outros programas locais do Ubuntu, utilizamos portas d
 
 ---
 
-## 🧑‍💻 Como Programar e Criar Novas Funções nas Aulas
+## Como Programar e Criar Novas Funções nas Aulas
 
 Você **não precisa instalar o Node.js na sua máquina** se não quiser. O código da pasta `app/src/` está montado em tempo real no container Docker.
 
-### 🔄 Hot-Reload Automático:
+### Hot-Reload Automático:
 Quando você editar e salvar qualquer arquivo em `app/src/` no seu VS Code, o servidor dentro do Docker reinicia instantaneamente em menos de 1 segundo!
 
 ### Estrutura do Código em `app/src/`:
@@ -128,7 +128,7 @@ Ao salvar o arquivo (`Ctrl + S`), teste em: `http://localhost:3400/api/itens/cat
 
 ---
 
-## 📁 Como Configurar e Inicializar os Bancos (*Database as Code*)
+## Como Configurar e Inicializar os Bancos (*Database as Code*)
 
 Para que o professor e seus colegas consigam avaliar sua modelagem ao clonar seu fork, **todas as configurações de banco devem ser versionadas em arquivos na pasta `init/`**:
 
@@ -151,7 +151,7 @@ init/
 
 ---
 
-## 🛠️ Comandos de Manutenção
+## Comandos de Manutenção
 
 - **Ver logs da aplicação em tempo real:**
   ```bash
