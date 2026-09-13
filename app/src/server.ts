@@ -15,15 +15,26 @@ const PORT = process.env.PORT || 3400;
 app.use(cors());
 app.use(express.json());
 
-// Rota raiz com mapa simples da API
+// Rota raiz com mapa da API RetroVault
 app.get("/", (req: Request, res: Response) => {
   res.json({
-    titulo: "UTFPR — NoSQL Starter App",
+    titulo: "RetroVault API — E-commerce de Mídias Físicas de Jogos",
     disciplina: "Banco de Dados NoSQL (TSI34E-TSI4)",
     professor: "Prof. Marcelo Vichar",
-    endpoints: {
-      health: "GET /api/health",
-      itens_simples: "GET /api/itens",
+    autor: "Lucas Rosa",
+    checkpoint: "Checkpoint 1",
+    endpoints_checkpoint_1: {
+      destaques_bem_avaliados: "GET /api/jogos/destaques",
+      promocoes_midias: "GET /api/jogos/promocoes",
+      fila_expedicao: "GET /api/pedidos/expedicao",
+      atualizar_preco_estoque: "PATCH /api/jogos/:sku/preco-estoque",
+      atualizar_status_pedido: "PATCH /api/pedidos/:id/status",
+    },
+    colecoes: {
+      jogos: "GET /api/jogos",
+      pedidos: "GET /api/pedidos",
+      categorias: "GET /api/categorias",
+      clientes: "GET /api/clientes",
     },
     interfaces_web: {
       elasticvue: "http://localhost:8400",

@@ -47,7 +47,7 @@ Para evitar conflitos com outros programas locais do Ubuntu, utilizamos portas d
 | :--- | :--- | :--- | :--- |
 | **API Starter (Express + TS)** | [http://localhost:3400](http://localhost:3400) | Aplicação com hot-reload ativo | Sem autenticação |
 | **ElasticVue (Elasticsearch)** | [http://localhost:8400](http://localhost:8400) | Interface visual para explorar índices e buscas | Conecta em `http://localhost:9200` |
-| **Mongo Express (MongoDB)** | [http://localhost:8401](http://localhost:8401) | Visualizar coleções do banco **GastroHub** | Já conecta autenticado |
+| **Mongo Express (MongoDB)** | [http://localhost:8401](http://localhost:8401) | Visualizar coleções do banco **RetroVault** | Já conecta autenticado |
 | **Redis Commander (Redis)** | [http://localhost:8402](http://localhost:8402) | Inspecionar chaves, TTLs e valores em memória | Sem necessidade de login |
 | **MongoDB (Porta direta)** | `localhost:27034` | Conexão para Compass, DBeaver ou VS Code | `root` / `root` |
 | **Redis (Porta direta)** | `localhost:6334` | Conexão direta TCP | Sem senha |
@@ -55,11 +55,17 @@ Para evitar conflitos com outros programas locais do Ubuntu, utilizamos portas d
 
 ---
 
-## 📡 Endpoints Prontos para Testar
+## 📡 Endpoints Prontos para Testar (RetroVault — Checkpoint 1)
 
 - **Health Check dos 3 Bancos:** [http://localhost:3400/api/health](http://localhost:3400/api/health)
-- **Simple Collection (GET /api/itens):** [http://localhost:3400/api/itens](http://localhost:3400/api/itens)
+- **1. Vitrine de Destaques (Nota >= 4.5):** [http://localhost:3400/api/jogos/destaques](http://localhost:3400/api/jogos/destaques)
   - *Dica:* Na 1ª requisição, você verá `origem: "MONGODB (Salvo no Redis por 60s)"`. Na 2ª requisição, você verá `origem: "REDIS_CACHE (< 2ms)"`!
+- **2. Mídias em Promoção (Preço <= 150):** [http://localhost:3400/api/jogos/promocoes](http://localhost:3400/api/jogos/promocoes)
+- **3. Fila de Expedição e Envio:** [http://localhost:3400/api/pedidos/expedicao](http://localhost:3400/api/pedidos/expedicao)
+- **4. Catálogo Completo de Jogos:** [http://localhost:3400/api/jogos](http://localhost:3400/api/jogos)
+- **5. Lista de Pedidos:** [http://localhost:3400/api/pedidos](http://localhost:3400/api/pedidos)
+- **6. Categorias:** [http://localhost:3400/api/categorias](http://localhost:3400/api/categorias)
+- **7. Clientes:** [http://localhost:3400/api/clientes](http://localhost:3400/api/clientes)
 
 ---
 

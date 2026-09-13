@@ -1,4 +1,8 @@
 import { Router, Request, Response } from "express";
+import jogosRoutes from "./jogos.routes.js";
+import pedidosRoutes from "./pedidos.routes.js";
+import categoriasRoutes from "./categorias.routes.js";
+import clientesRoutes from "./clientes.routes.js";
 import itensRoutes from "./itens.routes.js";
 import { getDb } from "../database/mongo.js";
 import { getRedisClient } from "../database/redis.js";
@@ -48,7 +52,13 @@ routes.get("/health", async (req: Request, res: Response) => {
   res.status(httpStatus).json(status);
 });
 
-// Rota da coleção simples (GET /api/itens)
+// Rotas do RetroVault (Checkpoint 1)
+routes.use("/jogos", jogosRoutes);
+routes.use("/pedidos", pedidosRoutes);
+routes.use("/categorias", categoriasRoutes);
+routes.use("/clientes", clientesRoutes);
+
+// Rota retrocompatível da coleção simples
 routes.use("/itens", itensRoutes);
 
 export default routes;

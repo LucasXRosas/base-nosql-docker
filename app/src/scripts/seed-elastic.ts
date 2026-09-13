@@ -23,29 +23,32 @@ function getElasticInitConfig() {
     settings: { number_of_shards: 1, number_of_replicas: 0 },
     mappings: {
       properties: {
-        prato_id: { type: "keyword" },
-        restaurante_id: { type: "keyword" },
-        restaurante_nome: { type: "text" },
-        nome: { type: "text", boost: 3 },
+        jogo_id: { type: "keyword" },
+        sku: { type: "keyword" },
+        titulo: { type: "text", boost: 3 },
         descricao: { type: "text", boost: 2 },
+        plataforma: { type: "keyword" },
         categoria: { type: "keyword" },
         preco: { type: "float" },
-        ingredientes: { type: "text" },
-        alergenos: { type: "keyword" },
-        disponivel: { type: "boolean" },
+        quantidade_estoque: { type: "integer" },
+        tags: { type: "text" },
+        condicao: { type: "keyword" },
+        ano_lancamento: { type: "integer" },
+        ativo: { type: "boolean" },
+        media_nota: { type: "float" },
       },
     },
   };
 }
 
 export async function seedElasticsearch(keepConnectionsOpen = false) {
-  console.log("[Elasticsearch] Verificando/sincronizando índice 'pratos' a partir de init/elastic-init.json...");
+  console.log("[Elasticsearch] Verificando/sincronizando índice 'jogos' a partir de init/elastic-init.json...");
 
   await connectMongo();
   await connectElastic();
 
   const elastic = getElasticClient();
-  const indexName = "pratos";
+  const indexName = "jogos";
   const initConfig = getElasticInitConfig();
 
   // 1. Recria o índice com base no arquivo declarativo init/elastic-init.json
@@ -61,44 +64,47 @@ export async function seedElasticsearch(keepConnectionsOpen = false) {
     mappings: initConfig.mappings,
   });
 
-  // 2. Busca todos os pratos no MongoDB GastroHub
-  const colCardapio = getCollection("cardapio");
-  const colRestaurantes = getCollection("restaurantes");
+  // 2. Busca jogos e categorias no MongoDB RetroVault
+  const colJogos = getCollection("jogos");
+  const colCategorias = getCollection("categorias");
 
-  const pratos = await colCardapio.find().toArray();
-  const restaurantes = await colRestaurantes.find().toArray();
+  const jogos = await colJogos.find().toArray();
+  const categorias = await colCategorias.find().toArray();
 
-  const restMap = new Map<string, string>();
-  for (const r of restaurantes) {
-    restMap.set(r._id.toString(), r.nome);
+  const catMap = new Map<string, string>();
+  for (const c of categorias) {
+    catMap.set(c._id.toString(), c.nome);
   }
 
-  // 3. Indexa prato por prato
+  // 3. Indexa jogo por jogo
   let count = 0;
-  for (const prato of pratos) {
-    const restNome = prato.restaurante_id ? restMap.get(prato.restaurante_id.toString()) || "Desconhecido" : "Desconhecido";
+  for (const jogo of jogos) {
+    const catNome = jogo.categoria_id ? catMap.get(jogo.categoria_id.toString()) || "Geral" : "Geral";
 
     await elastic.index({
       index: indexName,
-      id: prato._id.toString(),
+      id: jogo._id.toString(),
       document: {
-        prato_id: prato._id.toString(),
-        restaurante_id: prato.restaurante_id ? prato.restaurante_id.toString() : null,
-        restaurante_nome: restNome,
-        nome: prato.nome,
-        descricao: prato.descricao,
-        categoria: prato.categoria,
-        preco: prato.preco,
-        ingredientes: Array.isArray(prato.ingredientes) ? prato.ingredientes.join(", ") : prato.ingredientes,
-        alergenos: prato.alergenos || [],
-        disponivel: prato.disponivel !== false,
+        jogo_id: jogo._id.toString(),
+        sku: jogo.sku,
+        titulo: jogo.titulo,
+        descricao: jogo.descricao,
+        plataforma: jogo.plataforma,
+        categoria: catNome,
+        preco: jogo.preco,
+        quantidade_estoque: jogo.quantidade_estoque,
+        tags: Array.isArray(jogo.tags) ? jogo.tags.join(" ") : jogo.tags,
+        condicao: jogo.especificacoes_midia?.condicao || "Seminovo",
+        ano_lancamento: jogo.especificacoes_midia?.ano_lancamento || null,
+        ativo: jogo.ativo !== false,
+        media_nota: jogo.avaliacoes_resumo?.media_nota || 0,
       },
     });
     count++;
   }
 
   await elastic.indices.refresh({ index: indexName });
-  console.log(`[Elasticsearch] Sucesso! ${count} pratos sincronizados no índice '${indexName}'.`);
+  console.log(`[Elasticsearch] Sucesso! ${count} jogos sincronizados no índice '${indexName}'.`);
 
   if (!keepConnectionsOpen) {
     await closeMongo();

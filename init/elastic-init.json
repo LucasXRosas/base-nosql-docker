@@ -5,16 +5,13 @@
   },
   "mappings": {
     "properties": {
-      "prato_id": {
+      "jogo_id": {
         "type": "keyword"
       },
-      "restaurante_id": {
+      "sku": {
         "type": "keyword"
       },
-      "restaurante_nome": {
-        "type": "text"
-      },
-      "nome": {
+      "titulo": {
         "type": "text",
         "boost": 3
       },
@@ -22,20 +19,32 @@
         "type": "text",
         "boost": 2
       },
+      "plataforma": {
+        "type": "keyword"
+      },
       "categoria": {
         "type": "keyword"
       },
       "preco": {
         "type": "float"
       },
-      "ingredientes": {
+      "quantidade_estoque": {
+        "type": "integer"
+      },
+      "tags": {
         "type": "text"
       },
-      "alergenos": {
+      "condicao": {
         "type": "keyword"
       },
-      "disponivel": {
+      "ano_lancamento": {
+        "type": "integer"
+      },
+      "ativo": {
         "type": "boolean"
+      },
+      "media_nota": {
+        "type": "float"
       }
     }
   }
