@@ -76,20 +76,19 @@ export class JogosController {
       const { sku } = req.params;
       const { preco, quantidade_estoque } = req.body;
 
-      if (preco === undefined || quantidade_estoque === undefined) {
-        res.status(400).json({ erro: "Campos 'preco' e 'quantidade_estoque' são obrigatórios." });
+      const updateFields: Record<string, any> = {};
+      if (preco !== undefined) updateFields.preco = Number(preco);
+      if (quantidade_estoque !== undefined) updateFields.quantidade_estoque = Number(quantidade_estoque);
+
+      if (Object.keys(updateFields).length === 0) {
+        res.status(400).json({ erro: "Pelo menos um dos campos ('preco' ou 'quantidade_estoque') deve ser informado." });
         return;
       }
 
       const col = getCollection("jogos");
       const result = await col.updateOne(
         { sku },
-        {
-          $set: {
-            preco: Number(preco),
-            quantidade_estoque: Number(quantidade_estoque),
-          },
-        }
+        { $set: updateFields }
       );
 
       if (result.matchedCount === 0) {
@@ -101,12 +100,9 @@ export class JogosController {
       await cacheDel(CACHE_KEY_DESTAQUES);
 
       res.json({
-        mensagem: "Preço e estoque atualizados com sucesso!",
+        mensagem: "Preço e/ou estoque atualizados com sucesso!",
         sku,
-        novos_valores: {
-          preco: Number(preco),
-          quantidade_estoque: Number(quantidade_estoque),
-        },
+        novos_valores: updateFields,
       });
     } catch (err: any) {
       res.status(500).json({ erro: "Erro ao atualizar preço e estoque", detalhe: err.message });

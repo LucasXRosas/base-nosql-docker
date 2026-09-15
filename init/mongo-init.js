@@ -10,6 +10,7 @@
  * 2. Coleções principais: categorias, jogos, clientes, pedidos
  * 3. Criação de índices de unicidade, performance e multikey
  * 4. Carga inicial de dados realistas e estruturados conforme o CHECKPOINT_1.md
+ *    (Mínimo de 20 documentos na coleção principal de jogos + categorias, clientes e pedidos)
  */
 
 db = db.getSiblingDB("retrovault");
@@ -20,38 +21,51 @@ db.categorias.createIndex({ "slug": 1 }, { unique: true });
 db.categorias.createIndex({ "nome": 1 });
 db.categorias.createIndex({ "ativa": 1 });
 
+const catSurvivalId = new ObjectId("65f8999f9f1b2c001c8e4000");
+const catRPGId = new ObjectId("65f8999f9f1b2c001c8e4001");
+const catAcaoId = new ObjectId("65f8999f9f1b2c001c8e4002");
+const catPlataformaId = new ObjectId("65f8999f9f1b2c001c8e4003");
+const catLutaId = new ObjectId("65f8999f9f1b2c001c8e4004");
+const catCorridaId = new ObjectId("65f8999f9f1b2c001c8e4005");
+
 db.categorias.insertMany([
   {
+    _id: catSurvivalId,
     nome: "Survival Horror",
     slug: "survival-horror",
     descricao: "Jogos com foco em sobrevivência, recursos escassos e tensão atmosférica.",
     ativa: true
   },
   {
+    _id: catRPGId,
     nome: "RPG",
     slug: "rpg",
     descricao: "Role-Playing Games com foco em progressão de personagem, narrativa rica e exploração.",
     ativa: true
   },
   {
+    _id: catAcaoId,
     nome: "Ação e Aventura",
     slug: "acao-e-aventura",
     descricao: "Jogos que combinam combates dinâmicos, resolução de quebra-cabeças e enredos imersivos.",
     ativa: true
   },
   {
+    _id: catPlataformaId,
     nome: "Plataforma",
     slug: "plataforma",
     descricao: "Clássicos e contemporâneos de pulo e progressão por fases de precisão.",
     ativa: true
   },
   {
+    _id: catLutaId,
     nome: "Luta",
     slug: "luta",
     descricao: "Disputas competitivas 1v1 ou em equipes com mecânicas avançadas de combate.",
     ativa: true
   },
   {
+    _id: catCorridaId,
     nome: "Corrida e Simulação",
     slug: "corrida-e-simulacao",
     descricao: "Mídias de simulação automobilística de alta precisão e competições de velocidade.",
@@ -59,19 +73,12 @@ db.categorias.insertMany([
   }
 ]);
 
-const catSurvival = db.categorias.findOne({ slug: "survival-horror" })._id;
-const catRPG = db.categorias.findOne({ slug: "rpg" })._id;
-const catAcao = db.categorias.findOne({ slug: "acao-e-aventura" })._id;
-const catPlataforma = db.categorias.findOne({ slug: "plataforma" })._id;
-const catLuta = db.categorias.findOne({ slug: "luta" })._id;
-const catCorrida = db.categorias.findOne({ slug: "corrida-e-simulacao" })._id;
-
 // Fornecedores de referência (Lojas parceiras e curadores certificados)
 const fornRetroWorld = new ObjectId("65f89a559f1b2c001c8e4010");
 const fornClassicGames = new ObjectId("65f89a559f1b2c001c8e4011");
 const fornGamerVault = new ObjectId("65f89a559f1b2c001c8e4012");
 
-// ── 2. COLEÇÃO: jogos ───────────────────────────────────────────────────────
+// ── 2. COLEÇÃO: jogos (20 documentos no catálogo) ───────────────────────────
 db.createCollection("jogos");
 db.jogos.createIndex({ "sku": 1 }, { unique: true });
 db.jogos.createIndex({ "categoria_id": 1 });
@@ -91,7 +98,7 @@ db.jogos.insertMany([
     quantidade_estoque: 15,
     ativo: true,
     data_cadastramento: new Date("2026-03-01T10:30:00Z"),
-    categoria_id: catSurvival,
+    categoria_id: catSurvivalId,
     fornecedor_id: fornRetroWorld,
     plataforma: "PlayStation 4",
     tags: ["ps4", "exclusivo", "survival-horror", "seminovo", "midia-fisica"],
@@ -123,7 +130,7 @@ db.jogos.insertMany([
     quantidade_estoque: 3,
     ativo: true,
     data_cadastramento: new Date("2026-02-15T14:00:00Z"),
-    categoria_id: catSurvival,
+    categoria_id: catSurvivalId,
     fornecedor_id: fornClassicGames,
     plataforma: "PlayStation 2",
     tags: ["ps2", "classico", "survival-horror", "raridade", "konami"],
@@ -155,7 +162,7 @@ db.jogos.insertMany([
     quantidade_estoque: 8,
     ativo: true,
     data_cadastramento: new Date("2026-02-20T11:00:00Z"),
-    categoria_id: catSurvival,
+    categoria_id: catSurvivalId,
     fornecedor_id: fornRetroWorld,
     plataforma: "Nintendo GameCube",
     tags: ["gamecube", "resident-evil", "survival-horror", "promocao"],
@@ -187,7 +194,7 @@ db.jogos.insertMany([
     quantidade_estoque: 20,
     ativo: true,
     data_cadastramento: new Date("2026-03-05T09:00:00Z"),
-    categoria_id: catAcao,
+    categoria_id: catAcaoId,
     fornecedor_id: fornGamerVault,
     plataforma: "Nintendo Switch",
     tags: ["switch", "zelda", "nintendo", "lacrado", "rpg", "aventura"],
@@ -219,7 +226,7 @@ db.jogos.insertMany([
     quantidade_estoque: 12,
     ativo: true,
     data_cadastramento: new Date("2026-01-18T16:00:00Z"),
-    categoria_id: catPlataforma,
+    categoria_id: catPlataformaId,
     fornecedor_id: fornGamerVault,
     plataforma: "Nintendo Switch",
     tags: ["switch", "mario", "plataforma", "nintendo", "seminovo"],
@@ -251,7 +258,7 @@ db.jogos.insertMany([
     quantidade_estoque: 2,
     ativo: true,
     data_cadastramento: new Date("2026-02-01T12:00:00Z"),
-    categoria_id: catRPG,
+    categoria_id: catRPGId,
     fornecedor_id: fornClassicGames,
     plataforma: "Super Nintendo",
     tags: ["snes", "rpg", "squaresoft", "raridade", "completo"],
@@ -283,7 +290,7 @@ db.jogos.insertMany([
     quantidade_estoque: 10,
     ativo: true,
     data_cadastramento: new Date("2026-03-02T13:45:00Z"),
-    categoria_id: catCorrida,
+    categoria_id: catCorridaId,
     fornecedor_id: fornRetroWorld,
     plataforma: "PlayStation 2",
     tags: ["ps2", "corrida", "simulador", "promocao", "sony"],
@@ -315,7 +322,7 @@ db.jogos.insertMany([
     quantidade_estoque: 5,
     ativo: true,
     data_cadastramento: new Date("2026-02-28T18:00:00Z"),
-    categoria_id: catLuta,
+    categoria_id: catLutaId,
     fornecedor_id: fornClassicGames,
     plataforma: "Super Nintendo",
     tags: ["snes", "luta", "capcom", "promocao", "retro"],
@@ -347,7 +354,7 @@ db.jogos.insertMany([
     quantidade_estoque: 14,
     ativo: true,
     data_cadastramento: new Date("2026-03-08T15:30:00Z"),
-    categoria_id: catRPG,
+    categoria_id: catRPGId,
     fornecedor_id: fornRetroWorld,
     plataforma: "PlayStation 4",
     tags: ["ps4", "souls", "fromsoftware", "rpg", "promocao"],
@@ -379,7 +386,7 @@ db.jogos.insertMany([
     quantidade_estoque: 25,
     ativo: true,
     data_cadastramento: new Date("2026-03-10T11:00:00Z"),
-    categoria_id: catAcao,
+    categoria_id: catAcaoId,
     fornecedor_id: fornRetroWorld,
     plataforma: "PlayStation 4",
     tags: ["ps4", "kratos", "acao", "exclusivo", "promocao"],
@@ -411,7 +418,7 @@ db.jogos.insertMany([
     quantidade_estoque: 18,
     ativo: true,
     data_cadastramento: new Date("2026-02-25T17:00:00Z"),
-    categoria_id: catRPG,
+    categoria_id: catRPGId,
     fornecedor_id: fornGamerVault,
     plataforma: "PlayStation 5",
     tags: ["ps5", "goty", "rpg", "fromsoftware", "lacrado"],
@@ -443,7 +450,7 @@ db.jogos.insertMany([
     quantidade_estoque: 6,
     ativo: true,
     data_cadastramento: new Date("2026-03-04T10:00:00Z"),
-    categoria_id: catAcao,
+    categoria_id: catAcaoId,
     fornecedor_id: fornClassicGames,
     plataforma: "PlayStation 2",
     tags: ["ps2", "stealth", "kojima", "acao", "promocao"],
@@ -465,6 +472,262 @@ db.jogos.insertMany([
       media_nota: 4.9,
       total_avaliacoes: 50
     }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a13"),
+    sku: "GAME-PS1-SOTN-013",
+    titulo: "Castlevania: Symphony of the Night",
+    descricao: "O ápice do estilo Metroidvania no PS1. Disco duplo preto original sem arranhões.",
+    preco: 420.00,
+    quantidade_estoque: 4,
+    ativo: true,
+    data_cadastramento: new Date("2026-01-20T14:30:00Z"),
+    categoria_id: catAcaoId,
+    fornecedor_id: fornClassicGames,
+    plataforma: "PlayStation",
+    tags: ["ps1", "metroidvania", "castlevania", "raridade", "konami"],
+    especificacoes_midia: {
+      condicao: "Seminovo",
+      estado_disco: "Excelente (Sem riscos)",
+      possui_caixa_original: true,
+      possui_manual: true,
+      regiao: "NTSC-U",
+      ano_lancamento: 1997
+    },
+    dimensoes_embalagem: {
+      altura_cm: 14.2,
+      largura_cm: 12.5,
+      profundidade_cm: 1.0,
+      peso_gramas: 140
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.98,
+      total_avaliacoes: 75
+    }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a14"),
+    sku: "GAME-MD-SONIC2-014",
+    titulo: "Sonic the Hedgehog 2",
+    descricao: "Cartucho clássico do Mega Drive com a estreia de Miles Tails Prower. Label perfeita.",
+    preco: 110.00,
+    quantidade_estoque: 8,
+    ativo: true,
+    data_cadastramento: new Date("2026-02-10T09:45:00Z"),
+    categoria_id: catPlataformaId,
+    fornecedor_id: fornRetroWorld,
+    plataforma: "Mega Drive",
+    tags: ["megadrive", "sonic", "sega", "plataforma", "promocao"],
+    especificacoes_midia: {
+      condicao: "Usado",
+      estado_disco: "Muito Bom",
+      possui_caixa_original: true,
+      possui_manual: false,
+      regiao: "NTSC-U",
+      ano_lancamento: 1992
+    },
+    dimensoes_embalagem: {
+      altura_cm: 18.0,
+      largura_cm: 13.0,
+      profundidade_cm: 2.5,
+      peso_gramas: 200
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.75,
+      total_avaliacoes: 48
+    }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a15"),
+    sku: "GAME-GBA-POKE-015",
+    titulo: "Pokémon Emerald Version",
+    descricao: "Cartucho original verde translúcido para Game Boy Advance. Bateria de relógio trocada recentemente.",
+    preco: 550.00,
+    quantidade_estoque: 3,
+    ativo: true,
+    data_cadastramento: new Date("2026-02-18T18:20:00Z"),
+    categoria_id: catRPGId,
+    fornecedor_id: fornClassicGames,
+    plataforma: "Game Boy Advance",
+    tags: ["gba", "pokemon", "nintendo", "rpg", "raridade"],
+    especificacoes_midia: {
+      condicao: "Seminovo",
+      estado_disco: "Excelente",
+      possui_caixa_original: false,
+      possui_manual: false,
+      regiao: "NTSC-U",
+      ano_lancamento: 2004
+    },
+    dimensoes_embalagem: {
+      altura_cm: 6.0,
+      largura_cm: 3.5,
+      profundidade_cm: 1.0,
+      peso_gramas: 40
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.92,
+      total_avaliacoes: 64
+    }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a16"),
+    sku: "GAME-X360-H3-016",
+    titulo: "Halo 3 - Edição Limitada em Lata Metal",
+    descricao: "Caixa metálica de colecionador original para Xbox 360 com livro de arte dos Brutes.",
+    preco: 125.00,
+    quantidade_estoque: 11,
+    ativo: true,
+    data_cadastramento: new Date("2026-03-01T15:00:00Z"),
+    categoria_id: catAcaoId,
+    fornecedor_id: fornGamerVault,
+    plataforma: "Xbox 360",
+    tags: ["xbox360", "halo", "fps", "acao", "promocao"],
+    especificacoes_midia: {
+      condicao: "Seminovo",
+      estado_disco: "Muito Bom",
+      possui_caixa_original: true,
+      possui_manual: true,
+      regiao: "NTSC-U",
+      ano_lancamento: 2007
+    },
+    dimensoes_embalagem: {
+      altura_cm: 19.0,
+      largura_cm: 13.5,
+      profundidade_cm: 2.0,
+      peso_gramas: 250
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.8,
+      total_avaliacoes: 52
+    }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a17"),
+    sku: "GAME-PS1-RE2-017",
+    titulo: "Resident Evil 2 - Versão Original 2 Discos",
+    descricao: "Caixa dupla clássica com as campanhas lendárias de Leon S. Kennedy e Claire Redfield.",
+    preco: 270.00,
+    quantidade_estoque: 5,
+    ativo: true,
+    data_cadastramento: new Date("2026-02-22T13:10:00Z"),
+    categoria_id: catSurvivalId,
+    fornecedor_id: fornClassicGames,
+    plataforma: "PlayStation",
+    tags: ["ps1", "resident-evil", "survival-horror", "capcom"],
+    especificacoes_midia: {
+      condicao: "Seminovo",
+      estado_disco: "Excelente",
+      possui_caixa_original: true,
+      possui_manual: true,
+      regiao: "NTSC-U",
+      ano_lancamento: 1998
+    },
+    dimensoes_embalagem: {
+      altura_cm: 14.2,
+      largura_cm: 12.5,
+      profundidade_cm: 2.0,
+      peso_gramas: 180
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.88,
+      total_avaliacoes: 70
+    }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a18"),
+    sku: "GAME-PS1-FF7-018",
+    titulo: "Final Fantasy VII - 3 Discos Original Black Label",
+    descricao: "Edição norte-americana completa de um dos maiores clássicos da história dos games.",
+    preco: 320.00,
+    quantidade_estoque: 6,
+    ativo: true,
+    data_cadastramento: new Date("2026-01-25T11:00:00Z"),
+    categoria_id: catRPGId,
+    fornecedor_id: fornClassicGames,
+    plataforma: "PlayStation",
+    tags: ["ps1", "final-fantasy", "rpg", "squaresoft", "classico"],
+    especificacoes_midia: {
+      condicao: "Seminovo",
+      estado_disco: "Excelente",
+      possui_caixa_original: true,
+      possui_manual: true,
+      regiao: "NTSC-U",
+      ano_lancamento: 1997
+    },
+    dimensoes_embalagem: {
+      altura_cm: 14.2,
+      largura_cm: 12.5,
+      profundidade_cm: 2.5,
+      peso_gramas: 210
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.95,
+      total_avaliacoes: 98
+    }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a19"),
+    sku: "GAME-N64-ZELDA-019",
+    titulo: "The Legend of Zelda: Ocarina of Time",
+    descricao: "Cartucho cinza original do Nintendo 64. Bateria salvando perfeitamente e pinos higienizados.",
+    preco: 350.00,
+    quantidade_estoque: 4,
+    ativo: true,
+    data_cadastramento: new Date("2026-02-12T16:00:00Z"),
+    categoria_id: catAcaoId,
+    fornecedor_id: fornGamerVault,
+    plataforma: "Nintendo 64",
+    tags: ["n64", "zelda", "nintendo", "aventura", "goty"],
+    especificacoes_midia: {
+      condicao: "Seminovo",
+      estado_disco: "Excelente",
+      possui_caixa_original: false,
+      possui_manual: true,
+      regiao: "NTSC-U",
+      ano_lancamento: 1998
+    },
+    dimensoes_embalagem: {
+      altura_cm: 11.5,
+      largura_cm: 7.5,
+      profundidade_cm: 2.0,
+      peso_gramas: 110
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.98,
+      total_avaliacoes: 120
+    }
+  },
+  {
+    _id: new ObjectId("65f8a12b9f1b2c001c8e4a20"),
+    sku: "GAME-GC-SSBM-020",
+    titulo: "Super Smash Bros. Melee",
+    descricao: "O jogo de luta mais influente e competitivo do GameCube. Encarte e mídia em ótimo estado.",
+    preco: 260.00,
+    quantidade_estoque: 7,
+    ativo: true,
+    data_cadastramento: new Date("2026-03-03T10:30:00Z"),
+    categoria_id: catLutaId,
+    fornecedor_id: fornRetroWorld,
+    plataforma: "Nintendo GameCube",
+    tags: ["gamecube", "smash", "luta", "nintendo", "competitivo"],
+    especificacoes_midia: {
+      condicao: "Seminovo",
+      estado_disco: "Muito Bom",
+      possui_caixa_original: true,
+      possui_manual: true,
+      regiao: "NTSC-U",
+      ano_lancamento: 2001
+    },
+    dimensoes_embalagem: {
+      altura_cm: 15.0,
+      largura_cm: 13.5,
+      profundidade_cm: 1.5,
+      peso_gramas: 150
+    },
+    avaliacoes_resumo: {
+      media_nota: 4.9,
+      total_avaliacoes: 66
+    }
   }
 ]);
 
@@ -477,6 +740,8 @@ const idChrono = new ObjectId("65f8a12b9f1b2c001c8e4a06");
 const idGT4 = new ObjectId("65f8a12b9f1b2c001c8e4a07");
 const idSF2 = new ObjectId("65f8a12b9f1b2c001c8e4a08");
 const idGoW = new ObjectId("65f8a12b9f1b2c001c8e4a10");
+const idCastlevania = new ObjectId("65f8a12b9f1b2c001c8e4a13");
+const idSonic2 = new ObjectId("65f8a12b9f1b2c001c8e4a14");
 
 // ── 3. COLEÇÃO: clientes ────────────────────────────────────────────────────
 db.createCollection("clientes");
@@ -505,7 +770,7 @@ db.clientes.insertMany([
         principal: false
       }
     ],
-    desejos: [idTLoU, idSH2, idChrono]
+    desejos: [idTLoU, idSH2, idChrono, idCastlevania]
   },
   {
     _id: new ObjectId("65f8c0009f1b2c001c8e5002"),
@@ -553,7 +818,23 @@ db.clientes.insertMany([
         principal: true
       }
     ],
-    desejos: [idGT4, idSF2]
+    desejos: [idGT4, idSF2, idSonic2]
+  },
+  {
+    _id: new ObjectId("65f8c0009f1b2c001c8e5005"),
+    nome: "Juliana Prado",
+    email: "juliana.prado@email.com",
+    telefone: "42999004004",
+    enderecos: [
+      {
+        rua: "Rua Brigadeiro Rocha",
+        numero: 1200,
+        cidade: "Guarapuava",
+        cep: "85010-210",
+        principal: true
+      }
+    ],
+    desejos: [idCastlevania, idChrono]
   }
 ]);
 
@@ -561,6 +842,7 @@ const idCliLucas = new ObjectId("65f8c0009f1b2c001c8e5001");
 const idCliAna = new ObjectId("65f8c0009f1b2c001c8e5002");
 const idCliCarlos = new ObjectId("65f8c0009f1b2c001c8e5003");
 const idCliMariana = new ObjectId("65f8c0009f1b2c001c8e5004");
+const idCliJuliana = new ObjectId("65f8c0009f1b2c001c8e5005");
 
 // ── 4. COLEÇÃO: pedidos ─────────────────────────────────────────────────────
 db.createCollection("pedidos");
@@ -701,6 +983,27 @@ db.pedidos.insertMany([
       endereco_completo: "Rua Guaíra, 200 - Boqueirão, Guarapuava-PR, CEP 85015-000",
       codigo_rastreio: null,
       valor_frete: 30.00
+    }
+  },
+  {
+    _id: new ObjectId("65f8d1119f1b2c001c8e6007"),
+    cliente_id: idCliJuliana,
+    itens: [
+      {
+        jogo_id: idCastlevania,
+        titulo: "Castlevania: Symphony of the Night",
+        plataforma: "PlayStation",
+        quantidade: 1,
+        preco_unitario: 420.00
+      }
+    ],
+    valor_total: 440.00,
+    status: "em_separacao",
+    data_pedido: new Date("2026-09-13T08:30:00Z"),
+    entrega: {
+      endereco_completo: "Rua Brigadeiro Rocha, 1200 - Centro, Guarapuava-PR, CEP 85010-210",
+      codigo_rastreio: null,
+      valor_frete: 20.00
     }
   }
 ]);
