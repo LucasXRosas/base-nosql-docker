@@ -3,7 +3,6 @@ import jogosRoutes from "./jogos.routes.js";
 import pedidosRoutes from "./pedidos.routes.js";
 import categoriasRoutes from "./categorias.routes.js";
 import clientesRoutes from "./clientes.routes.js";
-import itensRoutes from "./itens.routes.js";
 import { getDb } from "../database/mongo.js";
 import { getRedisClient } from "../database/redis.js";
 import { getElasticClient } from "../database/elastic.js";
@@ -57,8 +56,5 @@ routes.use("/jogos", jogosRoutes);
 routes.use("/pedidos", pedidosRoutes);
 routes.use("/categorias", categoriasRoutes);
 routes.use("/clientes", clientesRoutes);
-
-// Rota retrocompatível da coleção simples
-routes.use("/itens", itensRoutes);
 
 export default routes;

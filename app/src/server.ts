@@ -74,8 +74,10 @@ async function bootstrap() {
   const server = app.listen(PORT, () => {
     console.log("\n🚀 Servidor Express rodando com sucesso!");
     console.log(`📡 URL Principal: http://localhost:${PORT}`);
-    console.log(`🩺 Health Check:  http://localhost:${PORT}/api/health`);
-    console.log(`📦 Simple Coleção: http://localhost:${PORT}/api/itens`);
+    console.log(`🩺 Health Check:       http://localhost:${PORT}/api/health`);
+    console.log(`🎮 Jogos Destaques:    http://localhost:${PORT}/api/jogos/destaques`);
+    console.log(`🏷️  Jogos Promoções:    http://localhost:${PORT}/api/jogos/promocoes`);
+    console.log(`🚚 Fila de Expedição:  http://localhost:${PORT}/api/pedidos/expedicao`);
     console.log("=======================================================\n");
   });
 

@@ -85,31 +85,33 @@ app/src/
 │   ├── redis.ts         # getRedisClient(), cacheGet(), cacheSet()
 │   └── elastic.ts       # getElasticClient()
 ├── controllers/         # Funções que tratam requisições e acessam os bancos
-│   └── itens.controller.ts  # Controller com GET pronto e simples!
+│   ├── jogos.controller.ts      # Destaques, promoções e CRUD de jogos
+│   ├── pedidos.controller.ts    # Fila de expedição e status
+│   ├── categorias.controller.ts # Gêneros e categorias
+│   └── clientes.controller.ts   # Clientes e wishlists
 └── routes/              # Mapeamento de rotas HTTP
-    ├── index.ts         # Health check e agregador
-    └── itens.routes.ts  # Rota GET /api/itens
+    ├── index.ts         # Health check e agregador de rotas
+    ├── jogos.routes.ts          # Rotas de jogos
+    ├── pedidos.routes.ts        # Rotas de pedidos
+    ├── categorias.routes.ts     # Rotas de categorias
+    └── clientes.routes.ts       # Rotas de clientes
 ```
 
 ### Exemplo: Como adicionar uma nova função no controller
 
-Abra `app/src/controllers/itens.controller.ts` e adicione seu método:
+Abra `app/src/controllers/jogos.controller.ts` e adicione seu método:
 
 ```typescript
 import { Request, Response } from "express";
 import { getCollection } from "../database/mongo.js";
-import { cacheSet, cacheGet } from "../database/redis.js";
 
-export class ItensController {
-  // 1. Método que já vem pronto:
-  static async listar(req: Request, res: Response): Promise<void> { ... }
-
-  // 2. Novo método adicionado durante a aula:
-  static async buscarPorCategoria(req: Request, res: Response): Promise<void> {
+export class JogosController {
+  // Novo método adicionado durante a aula:
+  static async buscarPorPlataforma(req: Request, res: Response): Promise<void> {
     try {
-      const col = getCollection("itens");
-      const categoria = req.params.categoria;
-      const resultados = await col.find({ categoria }).toArray();
+      const col = getCollection("jogos");
+      const plataforma = req.params.plataforma;
+      const resultados = await col.find({ plataforma, ativo: true }).toArray();
       res.json({ total: resultados.length, resultados });
     } catch (err: any) {
       res.status(500).json({ erro: err.message });
@@ -118,13 +120,13 @@ export class ItensController {
 }
 ```
 
-E registre a rota em `app/src/routes/itens.routes.ts`:
+E registre a rota em `app/src/routes/jogos.routes.ts`:
 
 ```typescript
-router.get("/categoria/:categoria", ItensController.buscarPorCategoria);
+router.get("/plataforma/:plataforma", JogosController.buscarPorPlataforma);
 ```
 
-Ao salvar o arquivo (`Ctrl + S`), teste em: `http://localhost:3400/api/itens/categoria/Pizzas`.
+Ao salvar o arquivo (`Ctrl + S`), teste em: `http://localhost:3400/api/jogos/plataforma/PlayStation%204`.
 
 ---
 
@@ -161,7 +163,7 @@ init/
   ```bash
   ./parar.sh
   ```
-- **Resetar tudo para o estado original de fábrica (GastroHub limpo):**
+- **Resetar tudo para o estado original de fábrica (RetroVault limpo):**
   ```bash
   ./reset.sh
   ```
