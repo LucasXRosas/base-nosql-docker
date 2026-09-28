@@ -3,14 +3,20 @@ import { JogosController } from "../controllers/jogos.controller.js";
 
 const router = Router();
 
-// Consultas específicas do Checkpoint 1 (definidas antes das rotas com parâmetros genéricos)
-router.get("/destaques", JogosController.listarDestaques);
+// Rotas específicas / sem parâmetros dinâmicos (devem vir antes de /:sku)
+router.get("/promocoes-sem-cache", JogosController.listarPromocoesSemCache);
 router.get("/promocoes", JogosController.listarPromocoes);
-router.patch("/:sku/preco-estoque", JogosController.atualizarPrecoEstoque);
+router.get("/destaques", JogosController.listarDestaques);
+router.delete("/cache", JogosController.limparCache);
 
-// Rotas gerais de CRUD e detalhes
-router.get("/", JogosController.listar);
+// Rotas parametrizadas por SKU
+router.patch("/:sku/preco-sem-cache", JogosController.atualizarPrecoSemInvalidar);
+router.patch("/:sku/preco-estoque", JogosController.atualizarPrecoEstoque);
+router.post("/:sku/view", JogosController.registrarVisualizacao);
 router.get("/:sku", JogosController.obterPorSku);
+
+// Rotas gerais da coleção de jogos
+router.get("/", JogosController.listar);
 router.post("/", JogosController.criar);
 
 export default router;

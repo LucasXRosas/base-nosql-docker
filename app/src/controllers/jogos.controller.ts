@@ -1,25 +1,62 @@
 import { Request, Response } from "express";
 import { ObjectId } from "mongodb";
+import { performance } from "perf_hooks";
 import { getCollection } from "../database/mongo.js";
-import { cacheGet, cacheSet, cacheDel } from "../database/redis.js";
+import { cacheGet, cacheSet, cacheDel, cacheDelMany, cacheIncr } from "../database/redis.js";
 
-const CACHE_KEY_DESTAQUES = "cache:jogos:destaques";
+const CACHE_KEY_DESTAQUES = "retrovault:jogos:destaques";
+const CACHE_KEY_PROMOCOES = "retrovault:jogos:promocoes";
+const CACHE_PREFIX_SKU = "retrovault:jogos:sku:";
+const CACHE_PREFIX_VIEWS = "retrovault:views:";
 
 export class JogosController {
   /**
-   * 1. VITRINE DE JOGOS MAIS BEM AVALIADOS (Checkpoint 1 — Consulta 1)
+   * BASELINE SEM CACHE — CONSULTA DIRETA AO MONGODB
+   * GET /api/jogos/promocoes-sem-cache
+   */
+  static async listarPromocoesSemCache(req: Request, res: Response): Promise<void> {
+    const t0 = performance.now();
+    try {
+      const col = getCollection("jogos");
+      const promocoes = await col
+        .find({ preco: { $lte: 150.0 }, ativo: true, quantidade_estoque: { $gt: 0 } })
+        .sort({ preco: 1 })
+        .toArray();
+
+      const duracao = (performance.now() - t0).toFixed(2);
+      res.setHeader("X-Cache", "DISABLED");
+      res.json({
+        origem: "MONGODB (SEM CACHE)",
+        tempo_resposta: `${duracao} ms`,
+        total_itens: promocoes.length,
+        total: promocoes.length,
+        promocoes,
+        dados: promocoes,
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro ao listar promoções sem cache", detalhe: err.message });
+    }
+  }
+
+  /**
+   * 1. VITRINE DE JOGOS MAIS BEM AVALIADOS (Checkpoint 1 — Consulta 1 + Cache-Aside)
    * GET /api/jogos/destaques
+   * TTL: 120 segundos
    */
   static async listarDestaques(req: Request, res: Response): Promise<void> {
+    const t0 = performance.now();
     try {
-      // Tenta recuperar do cache Redis (< 2ms)
       const cached = await cacheGet<any[]>(CACHE_KEY_DESTAQUES);
       if (cached) {
+        const duracao = (performance.now() - t0).toFixed(2);
         res.setHeader("X-Cache", "HIT");
         res.json({
-          origem: "REDIS_CACHE (< 2ms)",
+          origem: "REDIS (CACHE HIT)",
+          tempo_resposta: `${duracao} ms`,
+          total_itens: cached.length,
           total: cached.length,
           destaques: cached,
+          dados: cached,
         });
         return;
       }
@@ -31,14 +68,18 @@ export class JogosController {
         .limit(5)
         .toArray();
 
-      // Salva no Redis com TTL de 60 segundos
-      await cacheSet(CACHE_KEY_DESTAQUES, jogos, 60);
+      // Salva no Redis com TTL de 120 segundos
+      await cacheSet(CACHE_KEY_DESTAQUES, jogos, 120);
 
+      const duracao = (performance.now() - t0).toFixed(2);
       res.setHeader("X-Cache", "MISS");
       res.json({
-        origem: "MONGODB (Salvo no Redis por 60s)",
+        origem: "MONGODB (CACHE MISS)",
+        tempo_resposta: `${duracao} ms`,
+        total_itens: jogos.length,
         total: jogos.length,
         destaques: jogos,
+        dados: jogos,
       });
     } catch (err: any) {
       res.status(500).json({ erro: "Erro ao listar destaques", detalhe: err.message });
@@ -46,21 +87,46 @@ export class JogosController {
   }
 
   /**
-   * 2. BUSCA DE MÍDIAS EM PROMOÇÃO (Checkpoint 1 — Consulta 2)
+   * 2. BUSCA DE MÍDIAS EM PROMOÇÃO (Checkpoint 1 — Consulta 2 + Cache-Aside)
    * GET /api/jogos/promocoes
+   * TTL: 60 segundos
    */
   static async listarPromocoes(req: Request, res: Response): Promise<void> {
+    const t0 = performance.now();
     try {
+      const cached = await cacheGet<any[]>(CACHE_KEY_PROMOCOES);
+      if (cached) {
+        const duracao = (performance.now() - t0).toFixed(2);
+        res.setHeader("X-Cache", "HIT");
+        res.json({
+          origem: "REDIS (CACHE HIT)",
+          tempo_resposta: `${duracao} ms`,
+          total_itens: cached.length,
+          total: cached.length,
+          promocoes: cached,
+          dados: cached,
+        });
+        return;
+      }
+
       const col = getCollection("jogos");
       const promocoes = await col
         .find({ preco: { $lte: 150.0 }, ativo: true, quantidade_estoque: { $gt: 0 } })
         .sort({ preco: 1 })
         .toArray();
 
+      // Salva no Redis com TTL de 60 segundos
+      await cacheSet(CACHE_KEY_PROMOCOES, promocoes, 60);
+
+      const duracao = (performance.now() - t0).toFixed(2);
+      res.setHeader("X-Cache", "MISS");
       res.json({
-        origem: "MONGODB",
+        origem: "MONGODB (CACHE MISS)",
+        tempo_resposta: `${duracao} ms`,
+        total_itens: promocoes.length,
         total: promocoes.length,
         promocoes,
+        dados: promocoes,
       });
     } catch (err: any) {
       res.status(500).json({ erro: "Erro ao listar promoções", detalhe: err.message });
@@ -68,7 +134,7 @@ export class JogosController {
   }
 
   /**
-   * 3. ATUALIZAÇÃO DE PREÇO E ESTOQUE DO JOGO (Checkpoint 1 — Consulta 4)
+   * 3. ATUALIZAÇÃO DE PREÇO E ESTOQUE COM INVALIDAÇÃO ATIVA (Checkpoint 1 — Consulta 4 + Invalidação)
    * PATCH /api/jogos/:sku/preco-estoque
    */
   static async atualizarPrecoEstoque(req: Request, res: Response): Promise<void> {
@@ -96,16 +162,108 @@ export class JogosController {
         return;
       }
 
-      // Invalida cache de destaques pois o item pode ter sofrido alteração
-      await cacheDel(CACHE_KEY_DESTAQUES);
+      // Invalidação Ativa no Redis: limpa listas cacheadas e o detalhe do item
+      const chavesInvalidar = [
+        CACHE_KEY_PROMOCOES,
+        CACHE_KEY_DESTAQUES,
+        `${CACHE_PREFIX_SKU}${sku}`,
+      ];
+      await cacheDelMany(chavesInvalidar);
 
       res.json({
-        mensagem: "Preço e/ou estoque atualizados com sucesso!",
+        mensagem: "Preço e/ou estoque atualizados com sucesso e cache invalidado!",
         sku,
         novos_valores: updateFields,
+        cache_invalidado: true,
+        chaves_invalidadas: chavesInvalidar,
+        aviso: "Caches do Redis invalidados com sucesso. A próxima consulta buscará dados frescos do MongoDB.",
       });
     } catch (err: any) {
       res.status(500).json({ erro: "Erro ao atualizar preço e estoque", detalhe: err.message });
+    }
+  }
+
+  /**
+   * DEMONSTRAÇÃO DE STALE DATA (Dado Obsoleto) — ATUALIZA MONGODB SEM LIMPAR O REDIS
+   * PATCH /api/jogos/:sku/preco-sem-cache
+   */
+  static async atualizarPrecoSemInvalidar(req: Request, res: Response): Promise<void> {
+    try {
+      const { sku } = req.params;
+      const { preco } = req.body;
+
+      if (preco === undefined) {
+        res.status(400).json({ erro: "Campo 'preco' é obrigatório no corpo da requisição." });
+        return;
+      }
+
+      const col = getCollection("jogos");
+      const result = await col.updateOne(
+        { sku },
+        { $set: { preco: Number(preco) } }
+      );
+
+      if (result.matchedCount === 0) {
+        res.status(404).json({ erro: `Jogo com SKU '${sku}' não encontrado.` });
+        return;
+      }
+
+      res.json({
+        mensagem: "Preço atualizado no MongoDB SEM invalidar o cache (Demonstração de Stale Data)!",
+        sku,
+        novo_preco: Number(preco),
+        cache_invalidado: false,
+        aviso: "O MongoDB foi atualizado, mas o Redis continua com o valor antigo em memória RAM. Consulte /api/jogos/promocoes para observar o dado obsoleto (Stale Data)!",
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro ao atualizar preço sem invalidar cache", detalhe: err.message });
+    }
+  }
+
+  /**
+   * INVALIDAÇÃO MANUAL DO CACHE
+   * DELETE /api/jogos/cache
+   */
+  static async limparCache(req: Request, res: Response): Promise<void> {
+    try {
+      await cacheDelMany([CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES]);
+      res.json({
+        mensagem: "Cache das consultas de jogos invalidado com sucesso!",
+        cache_invalidado: true,
+        chaves_removidas: [CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES],
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro ao limpar cache", detalhe: err.message });
+    }
+  }
+
+  /**
+   * CONTADOR ATÔMICO DE VISUALIZAÇÕES EM MEMÓRIA RAM (Redis INCR)
+   * POST /api/jogos/:sku/view
+   */
+  static async registrarVisualizacao(req: Request, res: Response): Promise<void> {
+    try {
+      const { sku } = req.params;
+      const col = getCollection("jogos");
+      const jogo = await col.findOne({ sku }, { projection: { titulo: 1, sku: 1 } });
+
+      if (!jogo) {
+        res.status(404).json({ erro: `Jogo com SKU '${sku}' não encontrado.` });
+        return;
+      }
+
+      const key = `${CACHE_PREFIX_VIEWS}${sku}`;
+      const totalViews = await cacheIncr(key);
+
+      res.json({
+        mensagem: "Visualização registrada com sucesso no Redis!",
+        sku,
+        titulo: jogo.titulo,
+        chave_redis: key,
+        total_visualizacoes: totalViews,
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro ao registrar visualização", detalhe: err.message });
     }
   }
 
@@ -145,12 +303,28 @@ export class JogosController {
   }
 
   /**
-   * 5. OBTER JOGO POR SKU
+   * 5. OBTER JOGO POR SKU (Com Cache-Aside)
    * GET /api/jogos/:sku
+   * TTL: 60 segundos
    */
   static async obterPorSku(req: Request, res: Response): Promise<void> {
+    const t0 = performance.now();
     try {
       const { sku } = req.params;
+      const cacheKey = `${CACHE_PREFIX_SKU}${sku}`;
+
+      const cached = await cacheGet<any>(cacheKey);
+      if (cached) {
+        const duracao = (performance.now() - t0).toFixed(2);
+        res.setHeader("X-Cache", "HIT");
+        res.json({
+          origem: "REDIS (CACHE HIT)",
+          tempo_resposta: `${duracao} ms`,
+          jogo: cached,
+        });
+        return;
+      }
+
       const col = getCollection("jogos");
       const jogo = await col.findOne({ sku });
 
@@ -159,8 +333,14 @@ export class JogosController {
         return;
       }
 
+      // Salva no cache com TTL de 60s
+      await cacheSet(cacheKey, jogo, 60);
+
+      const duracao = (performance.now() - t0).toFixed(2);
+      res.setHeader("X-Cache", "MISS");
       res.json({
-        origem: "MONGODB",
+        origem: "MONGODB (CACHE MISS)",
+        tempo_resposta: `${duracao} ms`,
         jogo,
       });
     } catch (err: any) {
@@ -210,7 +390,9 @@ export class JogosController {
       };
 
       const result = await col.insertOne(novoJogo);
-      await cacheDel(CACHE_KEY_DESTAQUES);
+
+      // Invalida cache das listas para incluir o novo produto
+      await cacheDelMany([CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES]);
 
       res.status(201).json({
         mensagem: "Jogo cadastrado com sucesso!",

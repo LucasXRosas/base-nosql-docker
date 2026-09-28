@@ -56,6 +56,17 @@ export async function cacheDel(key: string): Promise<void> {
   await client.del(key);
 }
 
+export async function cacheDelMany(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  const client = getRedisClient();
+  await client.del(...keys);
+}
+
+export async function cacheIncr(key: string): Promise<number> {
+  const client = getRedisClient();
+  return client.incr(key);
+}
+
 export async function closeRedis(): Promise<void> {
   if (redisClient) {
     await redisClient.quit();

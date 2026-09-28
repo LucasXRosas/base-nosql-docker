@@ -1,7 +1,13 @@
 # =============================================================================
-# REDIS INITIALIZATION COMMANDS — RETROVAULT (CHECKPOINT 1)
+# REDIS INITIALIZATION COMMANDS — RETROVAULT (CHECKPOINT 1 & CACHE)
 # =============================================================================
 # Executado automaticamente pelo script iniciar.sh ao subir o container do Redis.
+
+# 0. Limpeza preventiva de chaves legadas e reset de estruturas
+DEL ranking:pratos:pedidos
+DEL config:app
+DEL categorias:ativas
+DEL ranking:jogos:vendidos
 
 # 1. Configurações globais da loja de jogos (Estrutura: Hash)
 HSET config:app versao "1.0.0" ambiente "desenvolvimento" frete_padrao "15.00" loja "RetroVault" cidade "Guarapuava"
