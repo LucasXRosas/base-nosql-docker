@@ -12,12 +12,10 @@
         "type": "keyword"
       },
       "titulo": {
-        "type": "text",
-        "boost": 3
+        "type": "text"
       },
       "descricao": {
-        "type": "text",
-        "boost": 2
+        "type": "text"
       },
       "plataforma": {
         "type": "keyword"

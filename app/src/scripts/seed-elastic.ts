@@ -18,27 +18,7 @@ function getElasticInitConfig() {
     }
   }
 
-  // Fallback padrão se não encontrar o arquivo
-  return {
-    settings: { number_of_shards: 1, number_of_replicas: 0 },
-    mappings: {
-      properties: {
-        jogo_id: { type: "keyword" },
-        sku: { type: "keyword" },
-        titulo: { type: "text", boost: 3 },
-        descricao: { type: "text", boost: 2 },
-        plataforma: { type: "keyword" },
-        categoria: { type: "keyword" },
-        preco: { type: "float" },
-        quantidade_estoque: { type: "integer" },
-        tags: { type: "text" },
-        condicao: { type: "keyword" },
-        ano_lancamento: { type: "integer" },
-        ativo: { type: "boolean" },
-        media_nota: { type: "float" },
-      },
-    },
-  };
+  throw new Error("Arquivo init/elastic-init.json não encontrado.");
 }
 
 export async function seedElasticsearch(keepConnectionsOpen = false) {
