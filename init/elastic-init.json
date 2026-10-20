@@ -36,11 +36,11 @@
       },
       "titulo": {
         "type": "text",
-        "analyzer": "texto_ptbr"
+        "boost": 3
       },
       "descricao": {
         "type": "text",
-        "analyzer": "texto_ptbr"
+        "boost": 2
       },
       "plataforma": {
         "type": "keyword"

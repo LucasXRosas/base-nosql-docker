@@ -18,46 +18,20 @@ function getElasticInitConfig() {
     }
   }
 
-  // Fallback padrão se não encontrar o arquivo (sem boost, com texto_ptbr)
+  // Fallback padrão se não encontrar o arquivo
   return {
-    settings: {
-      number_of_shards: 1,
-      number_of_replicas: 0,
-      analysis: {
-        filter: {
-          portuguese_stop: {
-            type: "stop",
-            stopwords: "_portuguese_",
-          },
-          portuguese_stemmer: {
-            type: "stemmer",
-            language: "portuguese",
-          },
-        },
-        analyzer: {
-          texto_ptbr: {
-            tokenizer: "standard",
-            filter: [
-              "lowercase",
-              "asciifolding",
-              "portuguese_stop",
-              "portuguese_stemmer",
-            ],
-          },
-        },
-      },
-    },
+    settings: { number_of_shards: 1, number_of_replicas: 0 },
     mappings: {
       properties: {
         jogo_id: { type: "keyword" },
         sku: { type: "keyword" },
-        titulo: { type: "text", analyzer: "texto_ptbr" },
-        descricao: { type: "text", analyzer: "texto_ptbr" },
+        titulo: { type: "text", boost: 3 },
+        descricao: { type: "text", boost: 2 },
         plataforma: { type: "keyword" },
         categoria: { type: "keyword" },
         preco: { type: "float" },
         quantidade_estoque: { type: "integer" },
-        tags: { type: "text", analyzer: "texto_ptbr" },
+        tags: { type: "text" },
         condicao: { type: "keyword" },
         ano_lancamento: { type: "integer" },
         ativo: { type: "boolean" },
