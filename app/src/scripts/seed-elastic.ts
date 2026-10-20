@@ -18,20 +18,46 @@ function getElasticInitConfig() {
     }
   }
 
-  // Fallback padrão se não encontrar o arquivo
+  // Fallback padrão se não encontrar o arquivo (sem boost, com texto_ptbr)
   return {
-    settings: { number_of_shards: 1, number_of_replicas: 0 },
+    settings: {
+      number_of_shards: 1,
+      number_of_replicas: 0,
+      analysis: {
+        filter: {
+          portuguese_stop: {
+            type: "stop",
+            stopwords: "_portuguese_",
+          },
+          portuguese_stemmer: {
+            type: "stemmer",
+            language: "portuguese",
+          },
+        },
+        analyzer: {
+          texto_ptbr: {
+            tokenizer: "standard",
+            filter: [
+              "lowercase",
+              "asciifolding",
+              "portuguese_stop",
+              "portuguese_stemmer",
+            ],
+          },
+        },
+      },
+    },
     mappings: {
       properties: {
         jogo_id: { type: "keyword" },
         sku: { type: "keyword" },
-        titulo: { type: "text", boost: 3 },
-        descricao: { type: "text", boost: 2 },
+        titulo: { type: "text", analyzer: "texto_ptbr" },
+        descricao: { type: "text", analyzer: "texto_ptbr" },
         plataforma: { type: "keyword" },
         categoria: { type: "keyword" },
         preco: { type: "float" },
         quantidade_estoque: { type: "integer" },
-        tags: { type: "text" },
+        tags: { type: "text", analyzer: "texto_ptbr" },
         condicao: { type: "keyword" },
         ano_lancamento: { type: "integer" },
         ativo: { type: "boolean" },
@@ -41,7 +67,7 @@ function getElasticInitConfig() {
   };
 }
 
-export async function seedElasticsearch(keepConnectionsOpen = false) {
+export async function seedElasticsearch(keepConnectionsOpen = false): Promise<number> {
   console.log("[Elasticsearch] Verificando/sincronizando índice 'jogos' a partir de init/elastic-init.json...");
 
   await connectMongo();
@@ -110,6 +136,8 @@ export async function seedElasticsearch(keepConnectionsOpen = false) {
     await closeMongo();
     await closeElastic();
   }
+
+  return count;
 }
 
 // Execução direta via CLI

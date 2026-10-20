@@ -3,6 +3,8 @@ import jogosRoutes from "./jogos.routes.js";
 import pedidosRoutes from "./pedidos.routes.js";
 import categoriasRoutes from "./categorias.routes.js";
 import clientesRoutes from "./clientes.routes.js";
+import redisRoutes from "./redis.routes.js";
+import buscaRoutes from "./busca.routes.js";
 import { getDb } from "../database/mongo.js";
 import { getRedisClient } from "../database/redis.js";
 import { getElasticClient } from "../database/elastic.js";
@@ -51,10 +53,12 @@ routes.get("/health", async (req: Request, res: Response) => {
   res.status(httpStatus).json(status);
 });
 
-// Rotas do RetroVault (Checkpoint 1)
+// Rotas do RetroVault (Checkpoint 1 e Checkpoint 2)
 routes.use("/jogos", jogosRoutes);
 routes.use("/pedidos", pedidosRoutes);
 routes.use("/categorias", categoriasRoutes);
 routes.use("/clientes", clientesRoutes);
+routes.use("/redis", redisRoutes);
+routes.use("/busca", buscaRoutes);
 
 export default routes;

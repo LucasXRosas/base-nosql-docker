@@ -1,7 +1,30 @@
 {
   "settings": {
     "number_of_shards": 1,
-    "number_of_replicas": 0
+    "number_of_replicas": 0,
+    "analysis": {
+      "filter": {
+        "portuguese_stop": {
+          "type": "stop",
+          "stopwords": "_portuguese_"
+        },
+        "portuguese_stemmer": {
+          "type": "stemmer",
+          "language": "portuguese"
+        }
+      },
+      "analyzer": {
+        "texto_ptbr": {
+          "tokenizer": "standard",
+          "filter": [
+            "lowercase",
+            "asciifolding",
+            "portuguese_stop",
+            "portuguese_stemmer"
+          ]
+        }
+      }
+    }
   },
   "mappings": {
     "properties": {
@@ -13,11 +36,11 @@
       },
       "titulo": {
         "type": "text",
-        "boost": 3
+        "analyzer": "texto_ptbr"
       },
       "descricao": {
         "type": "text",
-        "boost": 2
+        "analyzer": "texto_ptbr"
       },
       "plataforma": {
         "type": "keyword"
@@ -32,7 +55,8 @@
         "type": "integer"
       },
       "tags": {
-        "type": "text"
+        "type": "text",
+        "analyzer": "texto_ptbr"
       },
       "condicao": {
         "type": "keyword"

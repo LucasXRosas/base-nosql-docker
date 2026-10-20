@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { performance } from "perf_hooks";
 import { getCollection } from "../database/mongo.js";
 import { cacheGet, cacheSet, cacheDel, cacheDelMany, cacheIncr } from "../database/redis.js";
+import { getElasticClient } from "../database/elastic.js";
 
 const CACHE_KEY_DESTAQUES = "retrovault:jogos:destaques";
 const CACHE_KEY_PROMOCOES = "retrovault:jogos:promocoes";
@@ -151,6 +152,7 @@ export class JogosController {
         return;
       }
 
+      // 1. Atualiza no MongoDB (Fonte da Verdade)
       const col = getCollection("jogos");
       const result = await col.updateOne(
         { sku },
@@ -162,7 +164,9 @@ export class JogosController {
         return;
       }
 
-      // Invalidação Ativa no Redis: limpa listas cacheadas e o detalhe do item
+      const jogoAtualizado = await col.findOne({ sku });
+
+      // 2. Invalidação Ativa no Redis: limpa listas cacheadas e o detalhe do item
       const chavesInvalidar = [
         CACHE_KEY_PROMOCOES,
         CACHE_KEY_DESTAQUES,
@@ -170,13 +174,39 @@ export class JogosController {
       ];
       await cacheDelMany(chavesInvalidar);
 
+      // 3. Sincronização Imediata com ElasticSearch (Módulo 08 / Checkpoint 2)
+      let elasticStatus = "NÃO_APLICADO";
+      try {
+        if (jogoAtualizado) {
+          const elastic = getElasticClient();
+          await elastic.update({
+            index: "jogos",
+            id: jogoAtualizado._id.toString(),
+            doc: {
+              ...(preco !== undefined && { preco: Number(preco) }),
+              ...(quantidade_estoque !== undefined && { quantidade_estoque: Number(quantidade_estoque) }),
+            },
+            refresh: true, // Disponibiliza imediatamente para novas buscas textuais
+          });
+          elasticStatus = "SINCRONIZADO COM SUCESSO (REFRESH IMEDIATO)";
+        }
+      } catch (elasticErr: any) {
+        console.error(`[Elasticsearch] Falha na sincronização do jogo ${sku}:`, elasticErr.message);
+        elasticStatus = `FALHA_NA_SINCRONIZACAO: ${elasticErr.message}`;
+      }
+
       res.json({
-        mensagem: "Preço e/ou estoque atualizados com sucesso e cache invalidado!",
+        mensagem: "Preço e/ou estoque atualizados com sucesso e bancos sincronizados!",
         sku,
         novos_valores: updateFields,
         cache_invalidado: true,
         chaves_invalidadas: chavesInvalidar,
-        aviso: "Caches do Redis invalidados com sucesso. A próxima consulta buscará dados frescos do MongoDB.",
+        sincronizacao: {
+          mongodb: "ATUALIZADO (FONTE DA VERDADE)",
+          redis: "CACHE INVALIDADO (CHAVES REMOVIDAS)",
+          elasticsearch: elasticStatus,
+        },
+        aviso: "Dados atualizados no MongoDB e refletidos em tempo real na busca e no cache.",
       });
     } catch (err: any) {
       res.status(500).json({ erro: "Erro ao atualizar preço e estoque", detalhe: err.message });
@@ -394,10 +424,52 @@ export class JogosController {
       // Invalida cache das listas para incluir o novo produto
       await cacheDelMany([CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES]);
 
+      // Sincroniza novo jogo no ElasticSearch
+      let elasticStatus = "NÃO_APLICADO";
+      try {
+        const elastic = getElasticClient();
+        let catNome = "Geral";
+        if (categoria_id && ObjectId.isValid(categoria_id)) {
+          const colCat = getCollection("categorias");
+          const cat = await colCat.findOne({ _id: new ObjectId(categoria_id) });
+          if (cat) catNome = cat.nome;
+        }
+
+        await elastic.index({
+          index: "jogos",
+          id: result.insertedId.toString(),
+          document: {
+            jogo_id: result.insertedId.toString(),
+            sku: novoJogo.sku,
+            titulo: novoJogo.titulo,
+            descricao: novoJogo.descricao || "",
+            plataforma: novoJogo.plataforma,
+            categoria: catNome,
+            preco: novoJogo.preco,
+            quantidade_estoque: novoJogo.quantidade_estoque,
+            tags: Array.isArray(novoJogo.tags) ? novoJogo.tags.join(" ") : (novoJogo.tags || ""),
+            condicao: novoJogo.especificacoes_midia?.condicao || "Seminovo",
+            ano_lancamento: novoJogo.especificacoes_midia?.ano_lancamento || null,
+            ativo: novoJogo.ativo !== false,
+            media_nota: novoJogo.avaliacoes_resumo?.media_nota || 0,
+          },
+          refresh: true,
+        });
+        elasticStatus = "INDEXADO COM SUCESSO (REFRESH IMEDIATO)";
+      } catch (elasticErr: any) {
+        console.error(`[Elasticsearch] Falha na indexação do novo jogo ${sku}:`, elasticErr.message);
+        elasticStatus = `FALHA_NA_INDEXACAO: ${elasticErr.message}`;
+      }
+
       res.status(201).json({
-        mensagem: "Jogo cadastrado com sucesso!",
+        mensagem: "Jogo cadastrado com sucesso e sincronizado entre bancos!",
         id: result.insertedId,
         jogo: novoJogo,
+        sincronizacao: {
+          mongodb: "INSERIDO (FONTE DA VERDADE)",
+          redis: "CACHE DAS LISTAS INVALIDADO",
+          elasticsearch: elasticStatus,
+        },
       });
     } catch (err: any) {
       res.status(500).json({ erro: "Erro ao cadastrar jogo", detalhe: err.message });
