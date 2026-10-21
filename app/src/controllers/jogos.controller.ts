@@ -2,13 +2,29 @@ import { Request, Response } from "express";
 import { ObjectId } from "mongodb";
 import { performance } from "perf_hooks";
 import { getCollection } from "../database/mongo.js";
-import { cacheGet, cacheSet, cacheDel, cacheDelMany, cacheIncr } from "../database/redis.js";
+import { cacheGet, cacheSet, cacheDelMany, cacheIncr, getRedisClient } from "../database/redis.js";
 import { getElasticClient } from "../database/elastic.js";
+import { seedElasticsearch } from "../scripts/seed-elastic.js";
 
 const CACHE_KEY_DESTAQUES = "retrovault:jogos:destaques";
 const CACHE_KEY_PROMOCOES = "retrovault:jogos:promocoes";
 const CACHE_PREFIX_SKU = "retrovault:jogos:sku:";
 const CACHE_PREFIX_VIEWS = "retrovault:views:";
+const KEY_SYNC_PENDENTES = "retrovault:sync:pendentes";
+
+/**
+ * Helper para buscar jogo por SKU ou Título (case-insensitive substring)
+ */
+function buildJogoQuery(param: string) {
+  const escaped = param.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return {
+    $or: [
+      { sku: param },
+      { titulo: param },
+      { titulo: new RegExp(escaped, "i") },
+    ],
+  };
+}
 
 export class JogosController {
   /**
@@ -135,12 +151,75 @@ export class JogosController {
   }
 
   /**
-   * 3. ATUALIZAÇÃO DE PREÇO E ESTOQUE COM INVALIDAÇÃO ATIVA (Checkpoint 1 — Consulta 4 + Invalidação)
-   * PATCH /api/jogos/:sku/preco-estoque
+   * MÓDULO 08 — EXPERIMENTO 1: COMPARAR O MESMO REGISTRO NOS TRÊS BANCOS
+   * GET /api/jogos/:sku/comparar
    */
-  static async atualizarPrecoEstoque(req: Request, res: Response): Promise<void> {
+  static async compararTresBancos(req: Request, res: Response): Promise<void> {
     try {
-      const { sku } = req.params;
+      const { sku: param } = req.params;
+      const col = getCollection("jogos");
+
+      // 1. MongoDB (Fonte canônica da verdade)
+      const jogoMongo = await col.findOne(buildJogoQuery(param));
+
+      if (!jogoMongo) {
+        res.status(404).json({ erro: `Jogo '${param}' não encontrado no MongoDB.` });
+        return;
+      }
+
+      const strMongo = `${jogoMongo.titulo} · R$ ${Number(jogoMongo.preco).toFixed(2)}`;
+
+      // 2. Redis (Cache em memória)
+      const cachedRedis = (await cacheGet<any>(`${CACHE_PREFIX_SKU}${jogoMongo.sku}`)) ||
+                          (await cacheGet<any>(`${CACHE_PREFIX_SKU}${jogoMongo.titulo}`));
+
+      const strRedis = cachedRedis
+        ? `${cachedRedis.titulo || jogoMongo.titulo} · R$ ${Number(cachedRedis.preco).toFixed(2)}`
+        : "(sem cópia)";
+
+      // 3. ElasticSearch (Índice de busca textual)
+      let strElastic = "(sem cópia)";
+      try {
+        const elastic = getElasticClient();
+        const searchRes = await elastic.search({
+          index: "jogos",
+          query: {
+            bool: {
+              should: [
+                { term: { "sku.keyword": jogoMongo.sku } },
+                { term: { sku: jogoMongo.sku } },
+                { match: { titulo: jogoMongo.titulo } },
+              ],
+            },
+          },
+        });
+
+        if (searchRes.hits.hits.length > 0) {
+          const doc: any = searchRes.hits.hits[0]._source;
+          strElastic = `${doc.titulo} · R$ ${Number(doc.preco).toFixed(2)}`;
+        }
+      } catch (err: any) {
+        strElastic = `(erro ao consultar: ${err.message})`;
+      }
+
+      res.json({
+        mongodb: strMongo,
+        redis: strRedis,
+        elasticsearch: strElastic,
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro ao comparar bancos", detalhe: err.message });
+    }
+  }
+
+  /**
+   * MÓDULO 08 — EXPERIMENTO 2: ALTERAÇÃO SEM SINCRONIZAR (Altera só o MongoDB)
+   * PATCH /api/jogos/:sku/sem-sincronizar
+   * PATCH /api/jogos/:sku/preco-sem-cache
+   */
+  static async atualizarSemSincronizar(req: Request, res: Response): Promise<void> {
+    try {
+      const { sku: param } = req.params;
       const { preco, quantidade_estoque } = req.body;
 
       const updateFields: Record<string, any> = {};
@@ -152,101 +231,272 @@ export class JogosController {
         return;
       }
 
-      // 1. Atualiza no MongoDB (Fonte da Verdade)
       const col = getCollection("jogos");
-      const result = await col.updateOne(
-        { sku },
-        { $set: updateFields }
-      );
+      const result = await col.updateOne(buildJogoQuery(param), { $set: updateFields });
 
       if (result.matchedCount === 0) {
-        res.status(404).json({ erro: `Jogo com SKU '${sku}' não encontrado.` });
+        res.status(404).json({ erro: `Jogo '${param}' não encontrado.` });
         return;
       }
 
-      const jogoAtualizado = await col.findOne({ sku });
-
-      // 2. Invalidação Ativa no Redis: limpa listas cacheadas e o detalhe do item
-      const chavesInvalidar = [
-        CACHE_KEY_PROMOCOES,
-        CACHE_KEY_DESTAQUES,
-        `${CACHE_PREFIX_SKU}${sku}`,
-      ];
-      await cacheDelMany(chavesInvalidar);
-
-      // 3. Sincronização Imediata com ElasticSearch (Módulo 08 / Checkpoint 2)
-      let elasticStatus = "NÃO_APLICADO";
-      try {
-        if (jogoAtualizado) {
-          const elastic = getElasticClient();
-          await elastic.update({
-            index: "jogos",
-            id: jogoAtualizado._id.toString(),
-            doc: {
-              ...(preco !== undefined && { preco: Number(preco) }),
-              ...(quantidade_estoque !== undefined && { quantidade_estoque: Number(quantidade_estoque) }),
-            },
-            refresh: true, // Disponibiliza imediatamente para novas buscas textuais
-          });
-          elasticStatus = "SINCRONIZADO COM SUCESSO (REFRESH IMEDIATO)";
-        }
-      } catch (elasticErr: any) {
-        console.error(`[Elasticsearch] Falha na sincronização do jogo ${sku}:`, elasticErr.message);
-        elasticStatus = `FALHA_NA_SINCRONIZACAO: ${elasticErr.message}`;
-      }
-
       res.json({
-        mensagem: "Preço e/ou estoque atualizados com sucesso e bancos sincronizados!",
-        sku,
-        novos_valores: updateFields,
-        cache_invalidado: true,
-        chaves_invalidadas: chavesInvalidar,
-        sincronizacao: {
-          mongodb: "ATUALIZADO (FONTE DA VERDADE)",
-          redis: "CACHE INVALIDADO (CHAVES REMOVIDAS)",
-          elasticsearch: elasticStatus,
-        },
-        aviso: "Dados atualizados no MongoDB e refletidos em tempo real na busca e no cache.",
+        mongodb: `gravado (R$ ${preco !== undefined ? Number(preco).toFixed(2) : "atualizado"})`,
+        redis: "não alterado (dado obsoleto / stale data)",
+        elasticsearch: "não alterado (índice defasado)",
+        aviso: "A fonte da verdade mudou; as duas cópias não. Consulte /:sku/comparar para ver a divergência.",
       });
     } catch (err: any) {
-      res.status(500).json({ erro: "Erro ao atualizar preço e estoque", detalhe: err.message });
+      res.status(500).json({ erro: "Erro ao atualizar sem sincronizar", detalhe: err.message });
     }
   }
 
   /**
-   * DEMONSTRAÇÃO DE STALE DATA (Dado Obsoleto) — ATUALIZA MONGODB SEM LIMPAR O REDIS
-   * PATCH /api/jogos/:sku/preco-sem-cache
+   * MÓDULO 08 — EXPERIMENTO 3: REINDEXAÇÃO TOTAL (Ingênua)
+   * PATCH /api/jogos/:sku/reindexando-tudo
    */
-  static async atualizarPrecoSemInvalidar(req: Request, res: Response): Promise<void> {
+  static async atualizarReindexandoTudo(req: Request, res: Response): Promise<void> {
     try {
-      const { sku } = req.params;
-      const { preco } = req.body;
+      const { sku: param } = req.params;
+      const { preco, quantidade_estoque } = req.body;
 
-      if (preco === undefined) {
-        res.status(400).json({ erro: "Campo 'preco' é obrigatório no corpo da requisição." });
+      const updateFields: Record<string, any> = {};
+      if (preco !== undefined) updateFields.preco = Number(preco);
+      if (quantidade_estoque !== undefined) updateFields.quantidade_estoque = Number(quantidade_estoque);
+
+      const col = getCollection("jogos");
+      const jogoAtualizado = await col.findOneAndUpdate(
+        buildJogoQuery(param),
+        { $set: updateFields },
+        { returnDocument: "after" }
+      );
+
+      if (!jogoAtualizado) {
+        res.status(404).json({ erro: `Jogo '${param}' não encontrado.` });
+        return;
+      }
+
+      // Invalida cache no Redis
+      await cacheDelMany([
+        CACHE_KEY_PROMOCOES,
+        CACHE_KEY_DESTAQUES,
+        `${CACHE_PREFIX_SKU}${jogoAtualizado.sku}`,
+        `${CACHE_PREFIX_SKU}${jogoAtualizado.titulo}`,
+      ]);
+
+      // Reindexação total ingênua do catálogo inteiro
+      const totalIndexados = await seedElasticsearch(true);
+
+      res.json({
+        mongodb: "gravado",
+        documentos_indexados: totalIndexados,
+        redis: "invalidado",
+        aviso: "Reindexação total concluída (custo elevado: reindexou todos os itens para alterar apenas um).",
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro ao atualizar reindexando tudo", detalhe: err.message });
+    }
+  }
+
+  /**
+   * MÓDULO 08 — EXPERIMENTOS 4 E 5: ESCRITA SINCRONIZADA COM SUPORTE A SIMULAÇÃO DE FALHA
+   * PATCH /api/jogos/:sku
+   * PATCH /api/jogos/:sku/preco-estoque
+   */
+  static async atualizarSincronizado(req: Request, res: Response): Promise<void> {
+    try {
+      const { sku: param } = req.params;
+      const { preco, quantidade_estoque } = req.body;
+      const { simular_falha } = req.query;
+
+      const updateFields: Record<string, any> = {};
+      if (preco !== undefined) updateFields.preco = Number(preco);
+      if (quantidade_estoque !== undefined) updateFields.quantidade_estoque = Number(quantidade_estoque);
+
+      if (Object.keys(updateFields).length === 0) {
+        res.status(400).json({ erro: "Pelo menos um dos campos ('preco' ou 'quantidade_estoque') deve ser informado." });
+        return;
+      }
+
+      // 1. Grava no MongoDB (Fonte da Verdade)
+      const col = getCollection("jogos");
+      const jogoAtualizado = await col.findOneAndUpdate(
+        buildJogoQuery(param),
+        { $set: updateFields },
+        { returnDocument: "after" }
+      );
+
+      if (!jogoAtualizado) {
+        res.status(404).json({ erro: `Jogo '${param}' não encontrado.` });
+        return;
+      }
+
+      // 2. Invalida cache no Redis
+      const chavesInvalidar = [
+        CACHE_KEY_PROMOCOES,
+        CACHE_KEY_DESTAQUES,
+        `${CACHE_PREFIX_SKU}${jogoAtualizado.sku}`,
+        `${CACHE_PREFIX_SKU}${jogoAtualizado.titulo}`,
+      ];
+      await cacheDelMany(chavesInvalidar);
+
+      // 3. ElasticSearch: Atualiza APENAS aquele documento
+      if (simular_falha === "elastic") {
+        // Simulação de falha: registra pendência no Redis
+        const redis = getRedisClient();
+        const payloadPendencia = JSON.stringify({
+          jogo_id: jogoAtualizado._id.toString(),
+          sku: jogoAtualizado.sku,
+          titulo: jogoAtualizado.titulo,
+          data_falha: new Date().toISOString(),
+        });
+        await redis.rpush(KEY_SYNC_PENDENTES, payloadPendencia);
+
+        res.status(202).json({
+          mongodb: "gravado",
+          redis: "invalidado",
+          elasticsearch: "falhou (ElasticSearch fora do ar); pendência registrada",
+          chave_pendencias: KEY_SYNC_PENDENTES,
+        });
+        return;
+      }
+
+      // Fluxo normal sincronizado
+      const elastic = getElasticClient();
+      let catNome = "Geral";
+      if (jogoAtualizado.categoria_id && ObjectId.isValid(jogoAtualizado.categoria_id)) {
+        const colCat = getCollection("categorias");
+        const cat = await colCat.findOne({ _id: new ObjectId(jogoAtualizado.categoria_id) });
+        if (cat) catNome = cat.nome;
+      }
+
+      await elastic.index({
+        index: "jogos",
+        id: jogoAtualizado._id.toString(),
+        document: {
+          jogo_id: jogoAtualizado._id.toString(),
+          sku: jogoAtualizado.sku,
+          titulo: jogoAtualizado.titulo,
+          descricao: jogoAtualizado.descricao || "",
+          plataforma: jogoAtualizado.plataforma,
+          categoria: catNome,
+          preco: jogoAtualizado.preco,
+          quantidade_estoque: jogoAtualizado.quantidade_estoque,
+          tags: Array.isArray(jogoAtualizado.tags) ? jogoAtualizado.tags.join(" ") : (jogoAtualizado.tags || ""),
+          condicao: jogoAtualizado.especificacoes_midia?.condicao || "Seminovo",
+          ano_lancamento: jogoAtualizado.especificacoes_midia?.ano_lancamento || null,
+          ativo: jogoAtualizado.ativo !== false,
+          media_nota: jogoAtualizado.avaliacoes_resumo?.media_nota || 0,
+        },
+        refresh: true, // Torna visível imediatamente para novas buscas
+      });
+
+      res.json({
+        mongodb: "gravado",
+        redis: "invalidado",
+        elasticsearch: "atualizado (1 documento)",
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro na escrita sincronizada", detalhe: err.message });
+    }
+  }
+
+  /**
+   * MÓDULO 08 — EXPERIMENTO 5: LISTAR PENDÊNCIAS REGISTRADAS NO REDIS
+   * GET /api/jogos/sincronizacao/pendentes
+   */
+  static async listarPendencias(req: Request, res: Response): Promise<void> {
+    try {
+      const redis = getRedisClient();
+      const pendenciasRaw = await redis.lrange(KEY_SYNC_PENDENTES, 0, -1);
+      const pendencias = pendenciasRaw.map((raw) => {
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return raw;
+        }
+      });
+
+      res.json({
+        chave: KEY_SYNC_PENDENTES,
+        total_pendentes: pendencias.length,
+        pendencias,
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: "Erro ao listar pendências", detalhe: err.message });
+    }
+  }
+
+  /**
+   * MÓDULO 08 — EXPERIMENTO 6: REPROCESSAMENTO DE PENDÊNCIAS
+   * POST /api/jogos/sincronizacao/reprocessar
+   */
+  static async reprocessarPendencias(req: Request, res: Response): Promise<void> {
+    try {
+      const redis = getRedisClient();
+      const pendenciasRaw = await redis.lrange(KEY_SYNC_PENDENTES, 0, -1);
+
+      if (pendenciasRaw.length === 0) {
+        res.json({
+          reprocessados: 0,
+          jogos: [],
+          mensagem: "Nenhuma pendência na fila para reprocessar.",
+        });
         return;
       }
 
       const col = getCollection("jogos");
-      const result = await col.updateOne(
-        { sku },
-        { $set: { preco: Number(preco) } }
-      );
+      const elastic = getElasticClient();
+      const reprocessados: string[] = [];
 
-      if (result.matchedCount === 0) {
-        res.status(404).json({ erro: `Jogo com SKU '${sku}' não encontrado.` });
-        return;
+      for (const raw of pendenciasRaw) {
+        try {
+          const item = JSON.parse(raw);
+          // Lê o dado ATUAL no MongoDB (garante o dado mais recente)
+          const jogoAtual = await col.findOne({ _id: new ObjectId(item.jogo_id) });
+          if (jogoAtual) {
+            let catNome = "Geral";
+            if (jogoAtual.categoria_id && ObjectId.isValid(jogoAtual.categoria_id)) {
+              const colCat = getCollection("categorias");
+              const cat = await colCat.findOne({ _id: new ObjectId(jogoAtual.categoria_id) });
+              if (cat) catNome = cat.nome;
+            }
+
+            await elastic.index({
+              index: "jogos",
+              id: jogoAtual._id.toString(),
+              document: {
+                jogo_id: jogoAtual._id.toString(),
+                sku: jogoAtual.sku,
+                titulo: jogoAtual.titulo,
+                descricao: jogoAtual.descricao || "",
+                plataforma: jogoAtual.plataforma,
+                categoria: catNome,
+                preco: jogoAtual.preco,
+                quantidade_estoque: jogoAtual.quantidade_estoque,
+                tags: Array.isArray(jogoAtual.tags) ? jogoAtual.tags.join(" ") : (jogoAtual.tags || ""),
+                condicao: jogoAtual.especificacoes_midia?.condicao || "Seminovo",
+                ano_lancamento: jogoAtual.especificacoes_midia?.ano_lancamento || null,
+                ativo: jogoAtual.ativo !== false,
+                media_nota: jogoAtual.avaliacoes_resumo?.media_nota || 0,
+              },
+              refresh: true,
+            });
+            reprocessados.push(jogoAtual.titulo);
+          }
+        } catch (e: any) {
+          console.error("[Sincronização] Erro ao reprocessar item:", e.message);
+        }
       }
 
+      // Limpa a fila de pendências após o processamento com sucesso
+      await redis.del(KEY_SYNC_PENDENTES);
+
       res.json({
-        mensagem: "Preço atualizado no MongoDB SEM invalidar o cache (Demonstração de Stale Data)!",
-        sku,
-        novo_preco: Number(preco),
-        cache_invalidado: false,
-        aviso: "O MongoDB foi atualizado, mas o Redis continua com o valor antigo em memória RAM. Consulte /api/jogos/promocoes para observar o dado obsoleto (Stale Data)!",
+        reprocessados: reprocessados.length,
+        jogos: reprocessados,
       });
     } catch (err: any) {
-      res.status(500).json({ erro: "Erro ao atualizar preço sem invalidar cache", detalhe: err.message });
+      res.status(500).json({ erro: "Erro ao reprocessar pendências", detalhe: err.message });
     }
   }
 
@@ -273,21 +523,21 @@ export class JogosController {
    */
   static async registrarVisualizacao(req: Request, res: Response): Promise<void> {
     try {
-      const { sku } = req.params;
+      const { sku: param } = req.params;
       const col = getCollection("jogos");
-      const jogo = await col.findOne({ sku }, { projection: { titulo: 1, sku: 1 } });
+      const jogo = await col.findOne(buildJogoQuery(param), { projection: { titulo: 1, sku: 1 } });
 
       if (!jogo) {
-        res.status(404).json({ erro: `Jogo com SKU '${sku}' não encontrado.` });
+        res.status(404).json({ erro: `Jogo '${param}' não encontrado.` });
         return;
       }
 
-      const key = `${CACHE_PREFIX_VIEWS}${sku}`;
+      const key = `${CACHE_PREFIX_VIEWS}${jogo.sku}`;
       const totalViews = await cacheIncr(key);
 
       res.json({
         mensagem: "Visualização registrada com sucesso no Redis!",
-        sku,
+        sku: jogo.sku,
         titulo: jogo.titulo,
         chave_redis: key,
         total_visualizacoes: totalViews,
@@ -333,17 +583,19 @@ export class JogosController {
   }
 
   /**
-   * 5. OBTER JOGO POR SKU (Com Cache-Aside)
+   * 5. OBTER JOGO POR SKU OU NOME (Com Cache-Aside: TTL de 5 minutos)
    * GET /api/jogos/:sku
-   * TTL: 60 segundos
    */
   static async obterPorSku(req: Request, res: Response): Promise<void> {
     const t0 = performance.now();
     try {
-      const { sku } = req.params;
-      const cacheKey = `${CACHE_PREFIX_SKU}${sku}`;
+      const { sku: param } = req.params;
+      const col = getCollection("jogos");
 
+      // Tenta recuperar do cache Redis pelo parâmetro direto
+      const cacheKey = `${CACHE_PREFIX_SKU}${param}`;
       const cached = await cacheGet<any>(cacheKey);
+
       if (cached) {
         const duracao = (performance.now() - t0).toFixed(2);
         res.setHeader("X-Cache", "HIT");
@@ -355,16 +607,19 @@ export class JogosController {
         return;
       }
 
-      const col = getCollection("jogos");
-      const jogo = await col.findOne({ sku });
+      // Busca no MongoDB por SKU ou por Título
+      const jogo = await col.findOne(buildJogoQuery(param));
 
       if (!jogo) {
-        res.status(404).json({ erro: `Jogo com SKU '${sku}' não encontrado.` });
+        res.status(404).json({ erro: `Jogo '${param}' não encontrado.` });
         return;
       }
 
-      // Salva no cache com TTL de 60s
-      await cacheSet(cacheKey, jogo, 60);
+      // Salva no cache com TTL de 300s (5 minutos)
+      await cacheSet(`${CACHE_PREFIX_SKU}${jogo.sku}`, jogo, 300);
+      if (jogo.titulo !== jogo.sku) {
+        await cacheSet(`${CACHE_PREFIX_SKU}${jogo.titulo}`, jogo, 300);
+      }
 
       const duracao = (performance.now() - t0).toFixed(2);
       res.setHeader("X-Cache", "MISS");
@@ -374,7 +629,7 @@ export class JogosController {
         jogo,
       });
     } catch (err: any) {
-      res.status(500).json({ erro: "Erro ao buscar jogo por SKU", detalhe: err.message });
+      res.status(500).json({ erro: "Erro ao buscar jogo", detalhe: err.message });
     }
   }
 

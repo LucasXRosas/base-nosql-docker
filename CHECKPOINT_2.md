@@ -258,67 +258,115 @@ A rota de busca avançada implementa a estrutura `bool` do ElasticSearch, separa
   }
 }
 ```
-> **Vantagem de Performance:** As cláusulas em `filter` não participam do cálculo do `_score` e são cacheadas em memória pelo ElasticSearch em estruturas de *bitsets*, garantindo resposta instantânea mesmo com milhões de registros.
 
 ---
 
-## Seção 6 — Integração e Sincronização
+## Seção 6 — Integração e Sincronização (Módulo 08)
 
-A rota oficial de mutação `PATCH /api/jogos/:sku/preco-estoque` e a de cadastro `POST /api/jogos` implementam a orquestração transacional entre os três bancos:
+O princípio fundamental da arquitetura poliglota do **RetroVault** é: **Uma fonte da verdade. As outras são cópias.**
+
+### 6.1 Tabela de Fontes da Verdade
+
+Conforme especificado no Módulo 08, cada tipo de dado possui um banco com a palavra final e bancos secundários que mantêm cópias otimizadas para leitura e busca:
+
+| Entidade / Dado | Banco | Papel no Sistema | Justificativa Arquitetural |
+| :--- | :---: | :---: | :--- |
+| **Catálogo de Jogos, Clientes e Pedidos** (preço, estoque, ficha técnica, dados canônicos) | **MongoDB** | **Fonte da Verdade** | Persistência canônica em disco com garantia de ACID a nível de documento, consistência estrita para transações e mutações de catálogo. Tem a **palavra final** sobre qualquer dado do e-commerce. |
+| **Cache de Consultas Críticas** (rotas `/promocoes`, `/destaques`, jogos por SKU) | **Redis** | **Cópia Especializada** | Cópia volátil em memória RAM para entregar latência submilissegundo ($< 0.5\text{ ms}$) com expiração controlada por TTL, desonerando o MongoDB de leituras repetitivas. |
+| **Estruturas Operacionais e Filas** (carrinho `Hash`, expedição `List`, consoles `Set`, top vendas `ZSet`, pendências de sync `List`) | **Redis** | **Fonte da Verdade Temporária / Fila** | Operações atômicas nativas em memória RAM (`HINCRBY`, `RPUSH/LPOP`, `SADD`, `ZINCRBY`), ideais para fluxos de alta concorrência e filas de resiliência. |
+| **Índice de Busca Textual e Relevância** (acervo desnormalizado com pesos e filtros) | **ElasticSearch** | **Cópia Especializada** | Motor de índice invertido com analisador fonético em português (`texto_ptbr`), tolerância a erros de digitação (`fuzziness: "AUTO"`), pesos por campo (`titulo^3`, `descricao^2`, `tags`) e filtros compostos (`bool filter`). |
+
+---
+
+### 6.2 Fluxo de Escrita Sincronizada e Resiliência
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Cliente
-    participant App as API Express
-    participant Mongo as MongoDB (Master)
-    participant Redis as Redis (Cache)
-    participant Elastic as ElasticSearch (Search)
+    participant App as API Express (:3400)
+    participant Mongo as MongoDB (Fonte da Verdade)
+    participant Redis as Redis (Cache & Filas)
+    participant Elastic as ElasticSearch (Índice Invertido)
 
-    Cliente->>App: PATCH /api/jogos/GAME-PS4-GOW-010/preco-estoque { preco: 99.90 }
-    App->>Mongo: 1. updateOne({ sku }, { $set: { preco: 99.90 } })
+    Cliente->>App: PATCH /api/jogos/GAME-PS4-GOW-010 { preco: 99.90 }
+    App->>Mongo: 1. findOneAndUpdate({ sku }, { $set: { preco: 99.90 } })
     Note over Mongo: Gravação canônica em disco
-    Mongo-->>App: Sucesso (matchedCount: 1)
-    
-    par Invalidação no Redis
-        App->>Redis: 2. DEL retrovault:jogos:promocoes, retrovault:jogos:destaques, ...
-        Redis-->>App: OK (Chaves removidas)
-    and Atualização no ElasticSearch
-        App->>Elastic: 3. update({ index: "jogos", id, doc: { preco: 99.90 }, refresh: true })
-        Elastic-->>App: OK (Documento reindexado)
-    end
+    Mongo-->>App: Documento atualizado com sucesso
 
-    App-->>Cliente: Resposta HTTP 200 com status da sincronização
+    App->>Redis: 2. DEL promocoes, destaques, sku:GAME-PS4-GOW-010
+    Note over Redis: Expurgado da memória RAM (Cache Miss na próxima leitura)
+    Redis-->>App: OK
+
+    alt Fluxo Normal
+        App->>Elastic: 3. index({ index: "jogos", id, document, refresh: true })
+        Elastic-->>App: OK (Documento atualizado no índice)
+        App-->>Cliente: HTTP 200 { mongodb: "gravado", redis: "invalidado", elasticsearch: "atualizado (1 documento)" }
+    else Simulação de Falha do ElasticSearch (?simular_falha=elastic)
+        App->>Redis: 3. RPUSH retrovault:sync:pendentes { jogo_id, sku, data_falha }
+        Redis-->>App: OK (Pendência registrada na fila)
+        App-->>Cliente: HTTP 202 Accepted { mongodb: "gravado", redis: "invalidado", elasticsearch: "falhou; pendência registrada" }
+    end
 ```
 
-### 6.1 Respostas Técnicas Obrigatórias
+### 6.3 Rotas de Integração Implementadas no Controller (`jogos.controller.ts`)
+
+| Rota | Método | Função no Domínio e Papel Didático |
+| :--- | :---: | :--- |
+| `/api/jogos/:sku/comparar` | `GET` | **Inspeção de Cópias:** Consulta simultaneamente o mesmo título no MongoDB, no Redis e no ElasticSearch, revelando se as três cópias estão em harmonia ou defasadas. |
+| `/api/jogos/:sku/sem-sincronizar` | `PATCH` | **Simulação de Stale Data:** Atualiza o preço apenas no MongoDB, demonstrando o perigo de manter Redis e ElasticSearch desatualizados. |
+| `/api/jogos/:sku/reindexando-tudo` | `PATCH` | **Reindexação Ingênua:** Atualiza o MongoDB e recria o índice inteiro (`seedElasticsearch`). Evidencia o custo proibitivo de reconstruir o acervo todo para alterar apenas um registro. |
+| `/api/jogos/:sku` (e `/preco-estoque`) | `PATCH` | **Escrita Sincronizada Padrão:** Executa o ciclo atômico de 3 passos: grava no MongoDB, invalida o cache no Redis e atualiza apenas 1 documento no ElasticSearch com `refresh: true`. |
+| `/api/jogos/sincronizacao/pendentes` | `GET` | **Fila de Resiliência:** Lista todos os identificadores de jogos que falharam ao tentar sincronizar com o ElasticSearch, armazenados na lista `retrovault:sync:pendentes` do Redis. |
+| `/api/jogos/sincronizacao/reprocessar` | `POST` | **Worker de Reprocessamento:** Lê as pendências do Redis, busca o dado **atual** no MongoDB (evitando sobreposição de valores velhos) e reindexa com sucesso no ElasticSearch. |
+
+---
+
+### 6.4 Respostas Técnicas Obrigatórias da Rubrica
 
 #### Pergunta 1: Depois de uma alteração, em quanto tempo a busca e o cache passam a mostrar o dado novo?
-* **No Cache (Redis):** A exibição do dado novo é **imediata (0 segundos)** na próxima requisição. A rota de escrita invoca `cacheDelMany()`, que expurga atômica e instantaneamente as chaves do Redis. Quando o próximo cliente requisita a rota de promoções ou detalhes, a aplicação sofre um `Cache Miss` inevitável e busca o dado atualizado diretamente do MongoDB, repovoando a memória RAM em seguida.
-* **Na Busca Textual (ElasticSearch):** A sincronização é **imediata para o usuário** porque a API executa a chamada `elastic.update()` com o parâmetro `refresh: true`. Esse parâmetro força o ElasticSearch a abrir um novo *Searcher Lucene* instantaneamente, tornando o preço/estoque atualizado visível para buscas no mesmo milissegundo em que a requisição de escrita retorna.
+* **No Cache (Redis):** A atualização é **imediata (0 segundos)** na próxima leitura. No momento em que a mutação é executada, a função `cacheDelMany()` remove instantaneamente a chave da mídia física (`retrovault:jogos:sku:<sku>`) e as listas relacionadas (`promocoes` e `destaques`). Quando qualquer usuário ou frontend faz a próxima requisição, a aplicação sofre um `Cache Miss` obrigatório, lê o dado atualizado diretamente do MongoDB e recria o cache na RAM em submilissegundo.
+* **Na Busca Textual (ElasticSearch):** A atualização é **imediata para o usuário**. A API envia o documento alterado chamando o método `elastic.index()` com a opção `refresh: true`. No motor Lucene/ElasticSearch, essa diretiva força a abertura instantânea de um novo *Searcher*, tornando o novo preço e metadados visíveis para buscas com pesos (`multi_match`) e filtros (`bool filter`) no mesmo ciclo da requisição.
 
 #### Pergunta 2: O que acontece se a gravação no MongoDB der certo e a atualização do ElasticSearch falhar?
-* **Comportamento Atual no Código:**
-  Como o MongoDB é a **Fonte Canônica da Verdade**, se a mutação no MongoDB tiver sucesso mas o ElasticSearch estiver instável ou offline, a operação não cancela a escrita principal. O bloco `try/catch` no controller captura a exceção do ElasticSearch, registra o log de erro no servidor e devolve ao cliente uma resposta informando `elasticsearch: "FALHA_NA_SINCRONIZACAO"`. O cache do Redis ainda é invalidado, garantindo que as páginas de carrinho, checkout e consultas diretas mostrem o preço correto.
-* **Estratégias de Mitigação e Consistência Eventual para Produção:**
-  1. **Outbox Pattern com Fila Assíncrona:** A gravação no MongoDB grava um evento em uma coleção de eventos pendentes (`outbox`). Um worker em segundo plano lê essa fila e reexecuta a indexação no ElasticSearch com política de tentativas exponenciais (*exponential backoff*).
-  2. **Job de Conciliação / Reindexação Periódica:** O endpoint `POST /api/busca/reindexar` ou um cron agendado reindexa periodicamente documentos divergentes comparando o campo `data_atualizacao` entre o MongoDB e o ElasticSearch.
+* **Comportamento e Resiliência Implementados no Projeto:**
+  1. Como o MongoDB é a **Fonte Canônica da Verdade**, a escrita principal nunca é revertida nem cancelada por falhas nos sistemas secundários de busca.
+  2. O cache do Redis é invalidado com sucesso, garantindo que o checkout, carrinho e leitura direta nunca sirvam dados velhos.
+  3. Quando o ElasticSearch falha ou se encontra indisponível (simulado pelo parâmetro `?simular_falha=elastic`), o controller captura a exceção, responde com status HTTP `202 Accepted` e registra o identificador `_id` e o `sku` do jogo em uma lista persistente no Redis chamada **`retrovault:sync:pendentes`** via comando `RPUSH`.
+  4. **Garantia de Não-Regressão no Reprocessamento:** Ao acionar o endpoint `POST /api/jogos/sincronizacao/reprocessar` (ou via job agendado), o sistema lê apenas o identificador da pendência e busca o documento **atual** do MongoDB no instante do reprocessamento. Dessa forma, caso o produto tenha sofrido outras três alterações posteriores enquanto o ElasticSearch esteve fora do ar, o motor de busca sempre receberá o estado mais recente e consistente da Fonte da Verdade.
 
 ---
 
 ## Seção 7 — Roteiro de Demonstração
 
-Todos os comandos abaixo foram validados diretamente na aplicação em execução na porta `3400`:
+Este roteiro segue com exatidão a sequência oficial de homologação do professor (Slide 1):
+1. **Subir do zero:** `git clone` e `./iniciar.sh`
+2. **Cache:** leitura com `MISS` e depois `HIT`
+3. **Busca:** erro de digitação e filtro no ElasticSearch
+4. **Estruturas nativas do Redis:** Hash, List, Set e Sorted Set
+5. **Inspeção de Cópias:** comparação do dado nos três bancos
+6. **Alteração sem sincronizar:** evidenciando dados obsoletos (*Stale Data*)
+7. **Escrita sincronizada:** mutação refletida em tempo real
+8. **Falha e pendência:** registro no Redis em caso de queda do ElasticSearch
+9. **Reprocessamento:** conciliação definitiva
 
 ---
 
-### Teste 1: Cache-Aside no Redis — Latência e Invalidação
+### Passo 1: Subir o Ambiente do Zero
+```bash
+./iniciar.sh
+# O script sobe todos os containers e já executa a carga e criação do índice de busca 'jogos'.
+```
 
-#### 1.1 Primeira chamada (Cache Miss — Leitura do MongoDB em disco)
+---
+
+### Passo 2: Cache-Aside no Redis (Leitura com MISS e depois HIT)
+
+#### 2.1 Primeira chamada (Cache Miss — Busca no disco do MongoDB)
 ```bash
 curl -s http://localhost:3400/api/jogos/promocoes | jq '{origem, tempo_resposta, total_itens}'
 ```
-**Saída obtida:**
+**Saída esperada:**
 ```json
 {
   "origem": "MONGODB (CACHE MISS)",
@@ -327,11 +375,11 @@ curl -s http://localhost:3400/api/jogos/promocoes | jq '{origem, tempo_resposta,
 }
 ```
 
-#### 1.2 Segunda chamada imediata (Cache Hit — Servido da Memória RAM em $< 0.5\text{ ms}$)
+#### 2.2 Segunda chamada imediata (Cache Hit — Servido da Memória RAM em $< 0.5\text{ ms}$)
 ```bash
 curl -s http://localhost:3400/api/jogos/promocoes | jq '{origem, tempo_resposta, total_itens}'
 ```
-**Saída obtida:**
+**Saída esperada:**
 ```json
 {
   "origem": "REDIS (CACHE HIT)",
@@ -342,140 +390,13 @@ curl -s http://localhost:3400/api/jogos/promocoes | jq '{origem, tempo_resposta,
 
 ---
 
-### Teste 2: Estruturas de Dados Nativas no Redis
+### Passo 3: Busca no ElasticSearch (Erro de Digitação e Filtros)
 
-#### 2.1 Hash: Carrinho de Compras em Memória (`HSET`, `HINCRBY`, `HGETALL`)
-```bash
-# 1. Abrir carrinho
-curl -s -X POST http://localhost:3400/api/redis/carrinho/cli-001 \
-  -H "Content-Type: application/json" \
-  -d '{"cliente_nome": "Lucas Rosas", "status": "aberto", "total_itens": 0, "valor_total": "0.00"}' | jq '{estrutura, chave, carrinho}'
-
-# 2. Adicionar jogo e incrementar contador atomicamente
-curl -s -X PATCH http://localhost:3400/api/redis/carrinho/cli-001/adicionar-item \
-  -H "Content-Type: application/json" \
-  -d '{"titulo": "The Last of Us Part I", "quantidade": 1, "preco": 249.90}' | jq '{estrutura, item_adicionado, total_itens, valor_total}'
-
-# 3. Consultar dados estruturados do carrinho
-curl -s http://localhost:3400/api/redis/carrinho/cli-001 | jq '{estrutura, carrinho}'
-```
-**Saída obtida:**
-```json
-{
-  "estrutura": "HASH (HGETALL)",
-  "carrinho": {
-    "cliente_id": "cli-001",
-    "cliente_nome": "Lucas Rosas",
-    "status": "aberto",
-    "total_itens": "1",
-    "valor_total": "249.90",
-    "ultimo_item_adicionado": "The Last of Us Part I"
-  }
-}
-```
-
-#### 2.2 List: Esteira de Expedição Postal FIFO (`RPUSH`, `LRANGE`, `LPOP`)
-```bash
-# 1. Enfileirar dois pedidos pagos
-curl -s -X POST http://localhost:3400/api/redis/expedicao/pedidos -H "Content-Type: application/json" -d '{"pedido_id": "PED-001", "cliente": "Lucas", "destino": "Guarapuava/PR"}' | jq '{estrutura, posicao_na_fila}'
-curl -s -X POST http://localhost:3400/api/redis/expedicao/pedidos -H "Content-Type: application/json" -d '{"pedido_id": "PED-002", "cliente": "Ana", "destino": "Curitiba/PR"}' | jq '{estrutura, posicao_na_fila}'
-
-# 2. Despachar o primeiro pacote da fila
-curl -s -X POST http://localhost:3400/api/redis/expedicao/atender | jq '{estrutura, pedido_processado, pedidos_restantes_na_fila}'
-```
-**Saída obtida:**
-```json
-{
-  "estrutura": "LIST (LPOP)",
-  "pedido_processado": {
-    "pedido_id": "PED-001",
-    "cliente": "Lucas",
-    "destino": "Guarapuava/PR"
-  },
-  "pedidos_restantes_na_fila": 1
-}
-```
-
-#### 2.3 Set: Conjunto de Consoles Suportados (`SADD`, `SMEMBERS`, `SISMEMBER`)
-```bash
-# 1. Cadastrar consoles com duplicata ("PlayStation 2" enviado 2x)
-curl -s -X POST http://localhost:3400/api/redis/consoles -H "Content-Type: application/json" -d '{"consoles": ["PlayStation 2", "Super Nintendo", "Nintendo 64", "PlayStation 2"]}' | jq '{estrutura, novos_membros_inseridos, total_consoles_ativos}'
-
-# 2. Teste de pertinência O(1)
-curl -s "http://localhost:3400/api/redis/consoles/verificar?console=PlayStation%202" | jq '{estrutura, console_consultado, suportado}'
-curl -s "http://localhost:3400/api/redis/consoles/verificar?console=Atari%202600" | jq '{estrutura, console_consultado, suportado}'
-```
-**Saída obtida:**
-```json
-{
-  "estrutura": "SET (SISMEMBER — O(1))",
-  "console_consultado": "PlayStation 2",
-  "suportado": true
-}
-{
-  "estrutura": "SET (SISMEMBER — O(1))",
-  "console_consultado": "Atari 2600",
-  "suportado": false
-}
-```
-
-#### 2.4 Sorted Set: Placar de Vendas em Tempo Real (`ZINCRBY`, `ZREVRANGE`)
-```bash
-# 1. Computar vendas
-curl -s -X POST http://localhost:3400/api/redis/ranking/venda -H "Content-Type: application/json" -d '{"jogo": "The Last of Us Part I", "quantidade": 5}' | jq -c '{jogo, vendas_totais_acumuladas}'
-curl -s -X POST http://localhost:3400/api/redis/ranking/venda -H "Content-Type: application/json" -d '{"jogo": "Resident Evil 4", "quantidade": 8}' | jq -c '{jogo, vendas_totais_acumuladas}'
-
-# 2. Consultar Top 2 mais vendidos
-curl -s "http://localhost:3400/api/redis/ranking/top?limite=2" | jq .
-```
-**Saída obtida:**
-```json
-{
-  "origem": "REDIS",
-  "estrutura": "SORTED SET (ZSET — ZREVRANGE)",
-  "chave": "retrovault:ranking:jogos:vendidos",
-  "total_itens_retornados": 2,
-  "ranking": [
-    { "posicao": 1, "jogo": "Resident Evil 4", "unidades_vendidas": 8 },
-    { "posicao": 2, "jogo": "The Last of Us Part I", "unidades_vendidas": 5 }
-  ]
-}
-```
-
----
-
-### Teste 3: Análise e Busca no ElasticSearch
-
-#### 3.1 Limitação do MongoDB vs Análise Fonética no ElasticSearch
-```bash
-# No MongoDB com $regex: termo com erro de digitação não retorna nada
-curl -s "http://localhost:3400/api/busca/mongo?q=zeldda" | jq '{origem, termo, total}'
-
-# No ElasticSearch: analisador texto_ptbr decompõe os tokens
-curl -s --get "http://localhost:3400/api/busca/analisar" --data-urlencode "texto=Jogos de Aventuras e Histórias" | jq '{analisador, termos_no_indice}'
-```
-**Saída obtida:**
-```json
-{
-  "origem": "MONGODB ($regex no campo titulo)",
-  "termo": "zeldda",
-  "total": 0
-}
-{
-  "analisador": "texto_ptbr (lowercase + asciifolding + stopwords portuguesas + stemmer)",
-  "termos_no_indice": [
-    "jog",
-    "aventur",
-    "histor"
-  ]
-}
-```
-
-#### 3.2 Busca com Tolerância a Erro de Digitação (`fuzziness: "AUTO"`)
+#### 3.1 Busca com erro de digitação (`fuzziness: "AUTO"` encontra "Zelda" mesmo digitando "zeldda")
 ```bash
 curl -s "http://localhost:3400/api/busca?q=zeldda" | jq '{origem, termo, total, resultados: [.resultados[] | {sku, titulo, plataforma, relevancia}]}'
 ```
-**Saída obtida:**
+**Saída esperada:**
 ```json
 {
   "origem": "ELASTICSEARCH (multi_match + fuzziness)",
@@ -498,11 +419,11 @@ curl -s "http://localhost:3400/api/busca?q=zeldda" | jq '{origem, termo, total, 
 }
 ```
 
-#### 3.3 Busca Filtrada Combinada (`bool: must + filter`)
+#### 3.2 Busca combinada com filtro exato (`bool: must + filter` por plataforma "Nintendo 64")
 ```bash
 curl -s "http://localhost:3400/api/busca/filtrada?q=zelda&plataforma=Nintendo%2064" | jq '{origem, total, resultados: [.resultados[] | {sku, titulo, plataforma, preco}]}'
 ```
-**Saída obtida:**
+**Saída esperada:**
 ```json
 {
   "origem": "ELASTICSEARCH (bool: must + filter)",
@@ -520,61 +441,235 @@ curl -s "http://localhost:3400/api/busca/filtrada?q=zelda&plataforma=Nintendo%20
 
 ---
 
-### Teste 4: Sincronização Multibanco na Mutação
+### Passo 4: Estruturas de Dados Nativas no Redis
 
-Demonstração prática de que uma alteração reflete imediatamente no MongoDB, no ElasticSearch e invalida o Redis:
-
-#### 4.1 Verificar preço inicial no ElasticSearch
+#### 4.1 Hash: Carrinho de Compras em Memória (`HSET`, `HINCRBY`, `HGETALL`)
 ```bash
-curl -s "http://localhost:3400/api/busca?q=God%20of%20War" | jq '.resultados[] | select(.sku == "GAME-PS4-GOW-010") | {sku, titulo, preco}'
+curl -s -X POST http://localhost:3400/api/redis/carrinho/cli-001 -H "Content-Type: application/json" -d '{"cliente_nome": "Lucas Rosas"}' | jq .
+curl -s -X PATCH http://localhost:3400/api/redis/carrinho/cli-001/adicionar-item -H "Content-Type: application/json" -d '{"titulo": "The Last of Us Part I", "preco": 249.90}' | jq .
+curl -s http://localhost:3400/api/redis/carrinho/cli-001 | jq '{estrutura, carrinho}'
 ```
-**Saída obtida:**
+**Saída esperada:**
 ```json
 {
-  "sku": "GAME-PS4-GOW-010",
-  "titulo": "God of War (PlayStation Hits)",
-  "preco": 89.9
-}
-```
-
-#### 4.2 Alterar preço via `PATCH /api/jogos/:sku/preco-estoque`
-```bash
-curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/preco-estoque" \
-  -H "Content-Type: application/json" \
-  -d '{"preco": 99.90}' | jq '{mensagem, sku, novos_valores, sincronizacao}'
-```
-**Saída obtida:**
-```json
-{
-  "mensagem": "Preço e/ou estoque atualizados com sucesso e bancos sincronizados!",
-  "sku": "GAME-PS4-GOW-010",
-  "novos_valores": {
-    "preco": 99.9
-  },
-  "sincronizacao": {
-    "mongodb": "ATUALIZADO (FONTE DA VERDADE)",
-    "redis": "CACHE INVALIDADO (CHAVES REMOVIDAS)",
-    "elasticsearch": "SINCRONIZADO COM SUCESSO (REFRESH IMEDIATO)"
+  "estrutura": "HASH (HGETALL)",
+  "carrinho": {
+    "cliente_id": "cli-001",
+    "cliente_nome": "Lucas Rosas",
+    "status": "aberto",
+    "total_itens": "1",
+    "valor_total": "249.90",
+    "ultimo_item_adicionado": "The Last of Us Part I"
   }
 }
 ```
 
-#### 4.3 Consultar ElasticSearch novamente (Preço novo refletido na hora!)
+#### 4.2 List: Fila de Expedição Postal FIFO (`RPUSH`, `LPOP`)
 ```bash
-curl -s "http://localhost:3400/api/busca?q=God%20of%20War" | jq '.resultados[] | select(.sku == "GAME-PS4-GOW-010") | {sku, titulo, preco}'
+curl -s -X POST http://localhost:3400/api/redis/expedicao/pedidos -H "Content-Type: application/json" -d '{"pedido_id": "PED-001", "destino": "Guarapuava/PR"}' | jq '{estrutura, posicao_na_fila}'
+curl -s -X POST http://localhost:3400/api/redis/expedicao/atender | jq '{estrutura, pedido_processado, pedidos_restantes_na_fila}'
 ```
-**Saída obtida:**
+**Saída esperada:**
 ```json
 {
-  "sku": "GAME-PS4-GOW-010",
-  "titulo": "God of War (PlayStation Hits)",
-  "preco": 99.9
+  "estrutura": "LIST (LPOP)",
+  "pedido_processado": {
+    "pedido_id": "PED-001",
+    "destino": "Guarapuava/PR"
+  },
+  "pedidos_restantes_na_fila": 0
 }
 ```
 
-#### 4.4 Restaurar preço original de semente
+#### 4.3 Set: Conjunto de Consoles Únicos (`SADD`, `SISMEMBER`)
 ```bash
-curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/preco-estoque" \
-  -H "Content-Type: application/json" \
-  -d '{"preco": 89.90}' | jq '{mensagem, novos_valores, sincronizacao}'
+curl -s -X POST http://localhost:3400/api/redis/consoles -H "Content-Type: application/json" -d '{"consoles": ["PlayStation 2", "Super Nintendo", "Nintendo 64", "PlayStation 2"]}' | jq '{novos_membros_inseridos, total_consoles_ativos}'
+curl -s "http://localhost:3400/api/redis/consoles/verificar?console=PlayStation%202" | jq '{console_consultado, suportado}'
+```
+**Saída esperada:**
+```json
+{
+  "console_consultado": "PlayStation 2",
+  "suportado": true
+}
+```
+
+#### 4.4 Sorted Set: Placar de Mais Vendidos em Tempo Real (`ZINCRBY`, `ZREVRANGE`)
+```bash
+curl -s -X POST http://localhost:3400/api/redis/ranking/venda -H "Content-Type: application/json" -d '{"jogo": "Resident Evil 4", "quantidade": 8}' | jq -c '{jogo, vendas_totais_acumuladas}'
+curl -s "http://localhost:3400/api/redis/ranking/top?limite=2" | jq .
+```
+**Saída esperada:**
+```json
+{
+  "origem": "REDIS",
+  "estrutura": "SORTED SET (ZSET — ZREVRANGE)",
+  "total_itens_retornados": 2,
+  "ranking": [
+    { "posicao": 1, "jogo": "Resident Evil 4", "unidades_vendidas": 8 },
+    { "posicao": 2, "jogo": "The Last of Us Part I", "unidades_vendidas": 5 }
+  ]
+}
+```
+
+---
+
+### Passo 5: Módulo 08 — Inspeção das Três Cópias (`/comparar`)
+
+Fazemos a leitura do jogo **God of War** (`GAME-PS4-GOW-010`) para carregar o cache no Redis e comparamos as três cópias:
+```bash
+# 1. Carrega o item no cache do Redis
+curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" > /dev/null
+
+# 2. Inspeciona a presença nos três bancos
+curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/comparar" | jq .
+```
+**Saída esperada:**
+```json
+{
+  "mongodb": "God of War (PlayStation Hits) · R$ 89.90",
+  "redis": "God of War (PlayStation Hits) · R$ 89.90",
+  "elasticsearch": "God of War (PlayStation Hits) · R$ 89.90"
+}
+```
+
+---
+
+### Passo 6: Módulo 08 — Alteração Sem Sincronizar (Evidenciando Stale Data)
+
+Alteramos o preço no MongoDB para R$ 109.90 usando a rota não sincronizada:
+```bash
+curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/sem-sincronizar" \
+  -H "Content-Type: application/json" -d '{"preco": 109.90}' | jq .
+
+curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/comparar" | jq .
+```
+**Saída esperada:**
+```json
+{
+  "mongodb": "God of War (PlayStation Hits) · R$ 109.90",
+  "redis": "God of War (PlayStation Hits) · R$ 89.90",
+  "elasticsearch": "God of War (PlayStation Hits) · R$ 89.90"
+}
+```
+> **Análise:** A fonte da verdade mudou para R$ 109.90, mas Redis e ElasticSearch continuam exibindo o preço desatualizado de R$ 89.90 (Stale Data).
+
+Restauramos o preço com a rota sincronizada:
+```bash
+curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" \
+  -H "Content-Type: application/json" -d '{"preco": 89.90}' | jq .
+```
+
+---
+
+### Passo 7: Módulo 08 — Escrita Sincronizada Definitiva
+
+Atualizamos o preço para R$ 99.90 através da rota sincronizada oficial:
+```bash
+curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" \
+  -H "Content-Type: application/json" -d '{"preco": 99.90}' | jq .
+```
+**Saída esperada:**
+```json
+{
+  "mongodb": "gravado",
+  "redis": "invalidado",
+  "elasticsearch": "atualizado (1 documento)"
+}
+```
+
+Conferimos a sincronização imediata nos três bancos:
+```bash
+curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/comparar" | jq .
+```
+**Saída esperada:**
+```json
+{
+  "mongodb": "God of War (PlayStation Hits) · R$ 99.90",
+  "redis": "(sem cópia)",
+  "elasticsearch": "God of War (PlayStation Hits) · R$ 99.90"
+}
+```
+> **Análise:** O MongoDB e o ElasticSearch já exibem imediatamente o novo preço de R$ 99.90. O Redis exibe `(sem cópia)` porque a chave defasada foi ativamente expurgada; a próxima leitura recriará o cache com o valor novo.
+
+---
+
+### Passo 8: Módulo 08 — Falha Simulada e Registro de Pendência no Redis
+
+Simulamos o cenário em que o ElasticSearch fica temporariamente fora do ar durante uma alteração de preço para R$ 119.90:
+```bash
+curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010?simular_falha=elastic" \
+  -H "Content-Type: application/json" -d '{"preco": 119.90}' | jq .
+```
+**Saída esperada (HTTP 202 Accepted):**
+```json
+{
+  "mongodb": "gravado",
+  "redis": "invalidado",
+  "elasticsearch": "falhou (ElasticSearch fora do ar); pendência registrada",
+  "chave_pendencias": "retrovault:sync:pendentes"
+}
+```
+
+Conferimos que a pendência foi registrada na fila do Redis:
+```bash
+curl -s "http://localhost:3400/api/jogos/sincronizacao/pendentes" | jq .
+```
+**Saída esperada:**
+```json
+{
+  "chave": "retrovault:sync:pendentes",
+  "total_pendentes": 1,
+  "pendencias": [
+    {
+      "sku": "GAME-PS4-GOW-010",
+      "titulo": "God of War (PlayStation Hits)"
+    }
+  ]
+}
+```
+
+---
+
+### Passo 9: Módulo 08 — Reprocessamento e Conciliação das Pendências
+
+Disparamos o worker de reprocessamento para consumir a fila e conciliar o índice:
+```bash
+curl -s -X POST "http://localhost:3400/api/jogos/sincronizacao/reprocessar" | jq .
+```
+**Saída esperada:**
+```json
+{
+  "reprocessados": 1,
+  "jogos": [
+    "God of War (PlayStation Hits)"
+  ]
+}
+```
+
+Conferimos a harmonização nos três bancos:
+```bash
+curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/comparar" | jq .
+```
+**Saída esperada:**
+```json
+{
+  "mongodb": "God of War (PlayStation Hits) · R$ 119.90",
+  "redis": "(sem cópia)",
+  "elasticsearch": "God of War (PlayStation Hits) · R$ 119.90"
+}
+```
+
+Restauramos o valor inicial de semente (R$ 89.90) para manter o dataset limpo:
+```bash
+curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" \
+  -H "Content-Type: application/json" -d '{"preco": 89.90}' | jq .
+```
+**Saída esperada:**
+```json
+{
+  "mongodb": "gravado",
+  "redis": "invalidado",
+  "elasticsearch": "atualizado (1 documento)"
+}
 ```
