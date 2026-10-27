@@ -290,23 +290,23 @@ sequenceDiagram
     participant Elastic as ElasticSearch (Índice Invertido)
 
     Cliente->>App: PATCH /api/jogos/GAME-PS4-GOW-010 { preco: 99.90 }
-    App->>Mongo: 1. findOneAndUpdate({ sku }, { $set: { preco: 99.90 } })
+    App->>Mongo: findOneAndUpdate({ sku }, { $set: { preco: 99.90 } })
     Note over Mongo: Gravação canônica em disco
     Mongo-->>App: Documento atualizado com sucesso
 
-    App->>Redis: 2. DEL promocoes, destaques, sku:GAME-PS4-GOW-010
+    App->>Redis: DEL promocoes, destaques, sku:GAME-PS4-GOW-010
     Note over Redis: Expurgado da memória RAM (Cache Miss na próxima leitura)
     Redis-->>App: OK
 
     alt Fluxo Normal
-        App->>Elastic: 3. index({ index: "jogos", id, document, refresh: true })
+        App->>Elastic: index({ index: "jogos", id, document, refresh: true })
         Elastic-->>App: OK (Documento atualizado no índice)
-        App-->>Cliente: HTTP 200 { mongodb: "gravado", redis: "invalidado", elasticsearch: "atualizado" }
+        App-->>Cliente: HTTP 200 (Sucesso na atualização)
     else
-        Note over App, Elastic: Simulação de Falha do ElasticSearch (?simular_falha=elastic)
-        App->>Redis: 3. RPUSH retrovault:sync:pendentes { jogo_id, sku, data_falha }
+        Note over App,Elastic: Simulação de Falha do ElasticSearch (?simular_falha=elastic)
+        App->>Redis: RPUSH retrovault:sync:pendentes { jogo_id, sku, data_falha }
         Redis-->>App: OK (Pendência registrada na fila)
-        App-->>Cliente: HTTP 202 Accepted { mongodb: "gravado", redis: "invalidado", elasticsearch: "falhou; pendência registrada" }
+        App-->>Cliente: HTTP 202 Accepted (Pendência registrada)
     end
 ```
 
