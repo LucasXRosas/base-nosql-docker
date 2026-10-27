@@ -301,8 +301,9 @@ sequenceDiagram
     alt Fluxo Normal
         App->>Elastic: 3. index({ index: "jogos", id, document, refresh: true })
         Elastic-->>App: OK (Documento atualizado no índice)
-        App-->>Cliente: HTTP 200 { mongodb: "gravado", redis: "invalidado", elasticsearch: "atualizado (1 documento)" }
-    else Simulação de Falha do ElasticSearch (?simular_falha=elastic)
+        App-->>Cliente: HTTP 200 { mongodb: "gravado", redis: "invalidado", elasticsearch: "atualizado" }
+    else
+        Note over App, Elastic: Simulação de Falha do ElasticSearch (?simular_falha=elastic)
         App->>Redis: 3. RPUSH retrovault:sync:pendentes { jogo_id, sku, data_falha }
         Redis-->>App: OK (Pendência registrada na fila)
         App-->>Cliente: HTTP 202 Accepted { mongodb: "gravado", redis: "invalidado", elasticsearch: "falhou; pendência registrada" }
