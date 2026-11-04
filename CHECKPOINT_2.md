@@ -302,9 +302,10 @@ sequenceDiagram
         App->>Elastic: index({ index: "jogos", id, document, refresh: true })
         Elastic-->>App: OK (Documento atualizado no índice)
         App-->>Cliente: HTTP 200 (Sucesso na atualização)
-    else
-        Note over App,Elastic: Simulação de Falha do ElasticSearch (?simular_falha=elastic)
-        App->>Redis: RPUSH retrovault:sync:pendentes { jogo_id, sku, data_falha }
+    else Falha do ElasticSearch (real ou simulada com ?simular_falha=elastic)
+        App-xElastic: index(...) lança exceção (timeout, conexão recusada, 5xx...)
+        Note over App: try/catch captura a exceção — MongoDB não é revertido
+        App->>Redis: RPUSH retrovault:sync:pendentes { jogo_id, sku, data_falha, motivo }
         Redis-->>App: OK (Pendência registrada na fila)
         App-->>Cliente: HTTP 202 Accepted (Pendência registrada)
     end
@@ -319,7 +320,7 @@ sequenceDiagram
 | `/api/jogos/:sku/reindexando-tudo` | `PATCH` | **Reindexação Ingênua:** Atualiza o MongoDB e recria o índice inteiro (`seedElasticsearch`). Evidencia o custo proibitivo de reconstruir o acervo todo para alterar apenas um registro. |
 | `/api/jogos/:sku` (e `/preco-estoque`) | `PATCH` | **Escrita Sincronizada Padrão:** Executa o ciclo atômico de 3 passos: grava no MongoDB, invalida o cache no Redis e atualiza apenas 1 documento no ElasticSearch com `refresh: true`. |
 | `/api/jogos/sincronizacao/pendentes` | `GET` | **Fila de Resiliência:** Lista todos os identificadores de jogos que falharam ao tentar sincronizar com o ElasticSearch, armazenados na lista `retrovault:sync:pendentes` do Redis. |
-| `/api/jogos/sincronizacao/reprocessar` | `POST` | **Worker de Reprocessamento:** Lê as pendências do Redis, busca o dado **atual** no MongoDB (evitando sobreposição de valores velhos) e reindexa com sucesso no ElasticSearch. |
+| `/api/jogos/sincronizacao/reprocessar` | `POST` | **Worker de Reprocessamento:** Lê as pendências do Redis, busca o dado **atual** no MongoDB (evitando sobreposição de valores velhos) e reindexa no ElasticSearch. Cada pendência só é removida da fila (`LREM`) após reindexação bem-sucedida; as que falham novamente permanecem na lista para a próxima tentativa. |
 
 ---
 
@@ -333,8 +334,9 @@ sequenceDiagram
 * **Comportamento e Resiliência Implementados no Projeto:**
   1. Como o MongoDB é a **Fonte Canônica da Verdade**, a escrita principal nunca é revertida nem cancelada por falhas nos sistemas secundários de busca.
   2. O cache do Redis é invalidado com sucesso, garantindo que o checkout, carrinho e leitura direta nunca sirvam dados velhos.
-  3. Quando o ElasticSearch falha ou se encontra indisponível (simulado pelo parâmetro `?simular_falha=elastic`), o controller captura a exceção, responde com status HTTP `202 Accepted` e registra o identificador `_id` e o `sku` do jogo em uma lista persistente no Redis chamada **`retrovault:sync:pendentes`** via comando `RPUSH`.
+  3. A chamada `elastic.index()` fica dentro de um bloco `try/catch` próprio. Quando o ElasticSearch falha de verdade (container parado, timeout, conexão recusada, erro 5xx) **ou** quando a falha é simulada pelo parâmetro `?simular_falha=elastic` (que apenas lança uma exceção dentro do mesmo `try`), o controller captura a exceção, responde com status HTTP `202 Accepted` e registra o `_id`, o `sku` e o motivo da falha em uma lista persistente no Redis chamada **`retrovault:sync:pendentes`** via comando `RPUSH`. Falha real e falha simulada percorrem exatamente o mesmo caminho de código. Se nem o Redis estiver disponível para registrar a pendência, a API responde `500` informando que o MongoDB foi gravado mas a pendência não pôde ser registrada.
   4. **Garantia de Não-Regressão no Reprocessamento:** Ao acionar o endpoint `POST /api/jogos/sincronizacao/reprocessar` (ou via job agendado), o sistema lê apenas o identificador da pendência e busca o documento **atual** do MongoDB no instante do reprocessamento. Dessa forma, caso o produto tenha sofrido outras três alterações posteriores enquanto o ElasticSearch esteve fora do ar, o motor de busca sempre receberá o estado mais recente e consistente da Fonte da Verdade.
+  5. **Nenhuma pendência é perdida no reprocessamento:** a fila não é apagada em bloco (`DEL`). Cada item é removido individualmente com `LREM` **somente depois** de reindexado com sucesso. Se o ElasticSearch continuar fora do ar, os itens que falham permanecem em `retrovault:sync:pendentes` e são reportados no campo `falhas` da resposta, junto com `pendentes_restantes`. Pendências registradas por outras requisições durante o reprocessamento também são preservadas. Se o jogo tiver sido removido do MongoDB, o documento correspondente é excluído do índice e a pendência é descartada.
 
 ---
 
@@ -496,22 +498,40 @@ curl -s "http://localhost:3400/api/redis/consoles/verificar?console=PlayStation%
 ```
 
 #### 4.4 Sorted Set: Placar de Mais Vendidos em Tempo Real (`ZINCRBY`, `ZREVRANGE`)
+
+O `./iniciar.sh` (Passo 1) executa o `init/redis-init.commands`, que popula a chave **`retrovault:ranking:jogos:vendidos`** (a mesma usada pela API) com o placar inicial: *The Last of Us Part I* = 350, *Resident Evil 4* = 280, *Silent Hill 2* = 210, etc.
+
+Primeiro consultamos o Top 2 inicial:
 ```bash
-curl -s -X POST http://localhost:3400/api/redis/ranking/venda -H "Content-Type: application/json" -d '{"jogo": "Resident Evil 4", "quantidade": 8}' | jq -c '{jogo, vendas_totais_acumuladas}'
+curl -s "http://localhost:3400/api/redis/ranking/top?limite=2" | jq -c '.ranking'
+```
+**Saída esperada:**
+```json
+[{"posicao":1,"jogo":"The Last of Us Part I","unidades_vendidas":350},{"posicao":2,"jogo":"Resident Evil 4","unidades_vendidas":280}]
+```
+
+Registramos uma venda de 80 cópias de *Resident Evil 4* (`ZINCRBY`) e consultamos novamente o Top 2:
+```bash
+curl -s -X POST http://localhost:3400/api/redis/ranking/venda -H "Content-Type: application/json" -d '{"jogo": "Resident Evil 4", "quantidade": 80}' | jq -c '{jogo, vendas_totais_acumuladas}'
 curl -s "http://localhost:3400/api/redis/ranking/top?limite=2" | jq .
 ```
 **Saída esperada:**
 ```json
+{"jogo":"Resident Evil 4","vendas_totais_acumuladas":360}
+```
+```json
 {
   "origem": "REDIS",
   "estrutura": "SORTED SET (ZSET — ZREVRANGE)",
+  "chave": "retrovault:ranking:jogos:vendidos",
   "total_itens_retornados": 2,
   "ranking": [
-    { "posicao": 1, "jogo": "Resident Evil 4", "unidades_vendidas": 8 },
-    { "posicao": 2, "jogo": "The Last of Us Part I", "unidades_vendidas": 5 }
+    { "posicao": 1, "jogo": "Resident Evil 4", "unidades_vendidas": 360 },
+    { "posicao": 2, "jogo": "The Last of Us Part I", "unidades_vendidas": 350 }
   ]
 }
 ```
+> **Análise:** O `ZINCRBY` somou 80 ao score de *Resident Evil 4* (280 → 360) e o Sorted Set reordenou o placar automaticamente, fazendo-o ultrapassar *The Last of Us Part I* sem nenhuma agregação no MongoDB. (Os valores pressupõem o ambiente recém-iniciado pelo Passo 1; repetir o `POST` acumula novas vendas.)
 
 ---
 
@@ -608,9 +628,19 @@ curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010?simular_falha
   "mongodb": "gravado",
   "redis": "invalidado",
   "elasticsearch": "falhou (ElasticSearch fora do ar); pendência registrada",
+  "motivo": "Falha simulada: ElasticSearch fora do ar (?simular_falha=elastic)",
   "chave_pendencias": "retrovault:sync:pendentes"
 }
 ```
+
+> **Falha real (opcional):** o mesmo comportamento ocorre com o ElasticSearch realmente fora do ar, pois a chamada `elastic.index()` está protegida por `try/catch`. Para demonstrar, basta parar o container, fazer a alteração **sem** o parâmetro de simulação e religá-lo:
+> ```bash
+> docker stop nosql_elasticsearch
+> curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" \
+>   -H "Content-Type: application/json" -d '{"preco": 119.90}' | jq .   # HTTP 202 + pendência registrada
+> docker start nosql_elasticsearch
+> ```
+> Caso o `POST /reprocessar` seja chamado com o ElasticSearch ainda desligado, a pendência **não é perdida**: ela aparece em `falhas`, continua na lista e `pendentes_restantes` permanece maior que zero.
 
 Conferimos que a pendência foi registrada na fila do Redis:
 ```bash
@@ -644,9 +674,13 @@ curl -s -X POST "http://localhost:3400/api/jogos/sincronizacao/reprocessar" | jq
   "reprocessados": 1,
   "jogos": [
     "God of War (PlayStation Hits)"
-  ]
+  ],
+  "falhas": [],
+  "descartados": [],
+  "pendentes_restantes": 0
 }
 ```
+> **Análise:** A pendência só foi removida da lista (`LREM`) porque a reindexação teve sucesso. Se o ElasticSearch tivesse falhado de novo, ela continuaria em `retrovault:sync:pendentes`.
 
 Conferimos a harmonização nos três bancos:
 ```bash

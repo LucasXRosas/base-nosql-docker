@@ -8,6 +8,7 @@ DEL ranking:pratos:pedidos
 DEL config:app
 DEL categorias:ativas
 DEL ranking:jogos:vendidos
+DEL retrovault:ranking:jogos:vendidos
 
 # 1. Configurações globais da loja de jogos (Estrutura: Hash)
 HSET config:app versao "1.0.0" ambiente "desenvolvimento" frete_padrao "15.00" loja "RetroVault" cidade "Guarapuava"
@@ -16,12 +17,12 @@ HSET config:app versao "1.0.0" ambiente "desenvolvimento" frete_padrao "15.00" l
 SADD categorias:ativas "Survival Horror" "RPG" "Ação e Aventura" "Plataforma" "Luta" "Corrida e Simulação"
 
 # 3. Ranking de jogos mais vendidos na plataforma (Estrutura: Sorted Set)
-ZADD ranking:jogos:vendidos 350 "The Last of Us Part I"
-ZADD ranking:jogos:vendidos 280 "Resident Evil 4"
-ZADD ranking:jogos:vendidos 210 "Silent Hill 2"
-ZADD ranking:jogos:vendidos 180 "Elden Ring"
-ZADD ranking:jogos:vendidos 120 "Super Mario Odyssey"
-ZADD ranking:jogos:vendidos 95 "God of War"
+ZADD retrovault:ranking:jogos:vendidos 350 "The Last of Us Part I"
+ZADD retrovault:ranking:jogos:vendidos 280 "Resident Evil 4"
+ZADD retrovault:ranking:jogos:vendidos 210 "Silent Hill 2"
+ZADD retrovault:ranking:jogos:vendidos 180 "Elden Ring"
+ZADD retrovault:ranking:jogos:vendidos 120 "Super Mario Odyssey"
+ZADD retrovault:ranking:jogos:vendidos 95 "God of War"
 
 # 4. Contador inicial de acessos à vitrine (Estrutura: String/Integer)
 SET stats:visitas:total 1000

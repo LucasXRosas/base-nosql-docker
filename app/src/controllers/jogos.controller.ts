@@ -26,6 +26,41 @@ function buildJogoQuery(param: string) {
   };
 }
 
+/**
+ * Indexa (ou reindexa) UM documento de jogo no ElasticSearch a partir do
+ * documento canônico do MongoDB. Lança exceção se o ElasticSearch falhar.
+ */
+async function indexarJogoNoElastic(jogo: any): Promise<void> {
+  const elastic = getElasticClient();
+  let catNome = "Geral";
+  if (jogo.categoria_id && ObjectId.isValid(jogo.categoria_id)) {
+    const colCat = getCollection("categorias");
+    const cat = await colCat.findOne({ _id: new ObjectId(jogo.categoria_id) });
+    if (cat) catNome = cat.nome;
+  }
+
+  await elastic.index({
+    index: "jogos",
+    id: jogo._id.toString(),
+    document: {
+      jogo_id: jogo._id.toString(),
+      sku: jogo.sku,
+      titulo: jogo.titulo,
+      descricao: jogo.descricao || "",
+      plataforma: jogo.plataforma,
+      categoria: catNome,
+      preco: jogo.preco,
+      quantidade_estoque: jogo.quantidade_estoque,
+      tags: Array.isArray(jogo.tags) ? jogo.tags.join(" ") : (jogo.tags || ""),
+      condicao: jogo.especificacoes_midia?.condicao || "Seminovo",
+      ano_lancamento: jogo.especificacoes_midia?.ano_lancamento || null,
+      ativo: jogo.ativo !== false,
+      media_nota: jogo.avaliacoes_resumo?.media_nota || 0,
+    },
+    refresh: true, // Torna visível imediatamente para novas buscas
+  });
+}
+
 export class JogosController {
   /**
    * BASELINE SEM CACHE — CONSULTA DIRETA AO MONGODB
@@ -339,56 +374,47 @@ export class JogosController {
       ];
       await cacheDelMany(chavesInvalidar);
 
-      // 3. ElasticSearch: Atualiza APENAS aquele documento
-      if (simular_falha === "elastic") {
-        // Simulação de falha: registra pendência no Redis
-        const redis = getRedisClient();
+      // 3. ElasticSearch: Atualiza APENAS aquele documento.
+      // Qualquer falha (real ou simulada via ?simular_falha=elastic) cai no mesmo
+      // catch e registra a pendência no Redis — o MongoDB nunca é revertido.
+      try {
+        if (simular_falha === "elastic") {
+          throw new Error("Falha simulada: ElasticSearch fora do ar (?simular_falha=elastic)");
+        }
+        await indexarJogoNoElastic(jogoAtualizado);
+      } catch (errElastic: any) {
+        console.error("[Sincronização] Falha ao indexar no ElasticSearch:", errElastic.message);
+
         const payloadPendencia = JSON.stringify({
           jogo_id: jogoAtualizado._id.toString(),
           sku: jogoAtualizado.sku,
           titulo: jogoAtualizado.titulo,
           data_falha: new Date().toISOString(),
+          motivo: errElastic.message,
         });
-        await redis.rpush(KEY_SYNC_PENDENTES, payloadPendencia);
+
+        try {
+          await getRedisClient().rpush(KEY_SYNC_PENDENTES, payloadPendencia);
+        } catch (errRedis: any) {
+          // Nem o ElasticSearch nem a fila de pendências estão disponíveis.
+          res.status(500).json({
+            mongodb: "gravado",
+            elasticsearch: `falhou: ${errElastic.message}`,
+            erro: "Não foi possível registrar a pendência no Redis",
+            detalhe: errRedis.message,
+          });
+          return;
+        }
 
         res.status(202).json({
           mongodb: "gravado",
           redis: "invalidado",
           elasticsearch: "falhou (ElasticSearch fora do ar); pendência registrada",
+          motivo: errElastic.message,
           chave_pendencias: KEY_SYNC_PENDENTES,
         });
         return;
       }
-
-      // Fluxo normal sincronizado
-      const elastic = getElasticClient();
-      let catNome = "Geral";
-      if (jogoAtualizado.categoria_id && ObjectId.isValid(jogoAtualizado.categoria_id)) {
-        const colCat = getCollection("categorias");
-        const cat = await colCat.findOne({ _id: new ObjectId(jogoAtualizado.categoria_id) });
-        if (cat) catNome = cat.nome;
-      }
-
-      await elastic.index({
-        index: "jogos",
-        id: jogoAtualizado._id.toString(),
-        document: {
-          jogo_id: jogoAtualizado._id.toString(),
-          sku: jogoAtualizado.sku,
-          titulo: jogoAtualizado.titulo,
-          descricao: jogoAtualizado.descricao || "",
-          plataforma: jogoAtualizado.plataforma,
-          categoria: catNome,
-          preco: jogoAtualizado.preco,
-          quantidade_estoque: jogoAtualizado.quantidade_estoque,
-          tags: Array.isArray(jogoAtualizado.tags) ? jogoAtualizado.tags.join(" ") : (jogoAtualizado.tags || ""),
-          condicao: jogoAtualizado.especificacoes_midia?.condicao || "Seminovo",
-          ano_lancamento: jogoAtualizado.especificacoes_midia?.ano_lancamento || null,
-          ativo: jogoAtualizado.ativo !== false,
-          media_nota: jogoAtualizado.avaliacoes_resumo?.media_nota || 0,
-        },
-        refresh: true, // Torna visível imediatamente para novas buscas
-      });
 
       res.json({
         mongodb: "gravado",
@@ -445,55 +471,58 @@ export class JogosController {
       }
 
       const col = getCollection("jogos");
-      const elastic = getElasticClient();
       const reprocessados: string[] = [];
+      const falhas: Array<{ sku?: string; titulo?: string; erro: string }> = [];
+      const descartados: string[] = [];
 
+      // Cada pendência só sai da fila (LREM) depois de reindexada com sucesso.
+      // As que falham de novo permanecem em retrovault:sync:pendentes, e
+      // pendências registradas durante o reprocessamento também não são perdidas
+      // (nada de DEL na lista inteira).
       for (const raw of pendenciasRaw) {
+        let item: any;
         try {
-          const item = JSON.parse(raw);
-          // Lê o dado ATUAL no MongoDB (garante o dado mais recente)
-          const jogoAtual = await col.findOne({ _id: new ObjectId(item.jogo_id) });
-          if (jogoAtual) {
-            let catNome = "Geral";
-            if (jogoAtual.categoria_id && ObjectId.isValid(jogoAtual.categoria_id)) {
-              const colCat = getCollection("categorias");
-              const cat = await colCat.findOne({ _id: new ObjectId(jogoAtual.categoria_id) });
-              if (cat) catNome = cat.nome;
-            }
+          item = JSON.parse(raw);
+        } catch {
+          // Payload corrompido nunca poderá ser reprocessado: descarta.
+          await redis.lrem(KEY_SYNC_PENDENTES, 1, raw);
+          descartados.push(raw);
+          continue;
+        }
 
-            await elastic.index({
-              index: "jogos",
-              id: jogoAtual._id.toString(),
-              document: {
-                jogo_id: jogoAtual._id.toString(),
-                sku: jogoAtual.sku,
-                titulo: jogoAtual.titulo,
-                descricao: jogoAtual.descricao || "",
-                plataforma: jogoAtual.plataforma,
-                categoria: catNome,
-                preco: jogoAtual.preco,
-                quantidade_estoque: jogoAtual.quantidade_estoque,
-                tags: Array.isArray(jogoAtual.tags) ? jogoAtual.tags.join(" ") : (jogoAtual.tags || ""),
-                condicao: jogoAtual.especificacoes_midia?.condicao || "Seminovo",
-                ano_lancamento: jogoAtual.especificacoes_midia?.ano_lancamento || null,
-                ativo: jogoAtual.ativo !== false,
-                media_nota: jogoAtual.avaliacoes_resumo?.media_nota || 0,
-              },
-              refresh: true,
-            });
+        try {
+          // Lê o dado ATUAL no MongoDB (garante o dado mais recente)
+          const jogoAtual = ObjectId.isValid(item.jogo_id)
+            ? await col.findOne({ _id: new ObjectId(item.jogo_id) })
+            : null;
+
+          if (jogoAtual) {
+            await indexarJogoNoElastic(jogoAtual);
             reprocessados.push(jogoAtual.titulo);
+          } else {
+            // Jogo não existe mais na fonte da verdade: remove a cópia do índice.
+            await getElasticClient().delete(
+              { index: "jogos", id: String(item.jogo_id), refresh: true },
+              { ignore: [404] }
+            );
+            descartados.push(item.sku ?? String(item.jogo_id));
           }
+
+          await redis.lrem(KEY_SYNC_PENDENTES, 1, raw);
         } catch (e: any) {
           console.error("[Sincronização] Erro ao reprocessar item:", e.message);
+          falhas.push({ sku: item.sku, titulo: item.titulo, erro: e.message });
         }
       }
 
-      // Limpa a fila de pendências após o processamento com sucesso
-      await redis.del(KEY_SYNC_PENDENTES);
+      const pendentesRestantes = await redis.llen(KEY_SYNC_PENDENTES);
 
       res.json({
         reprocessados: reprocessados.length,
         jogos: reprocessados,
+        falhas,
+        descartados,
+        pendentes_restantes: pendentesRestantes,
       });
     } catch (err: any) {
       res.status(500).json({ erro: "Erro ao reprocessar pendências", detalhe: err.message });
