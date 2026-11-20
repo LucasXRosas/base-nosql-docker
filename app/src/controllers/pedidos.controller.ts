@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
-import { ObjectId } from "mongodb";
+import { ObjectId, MongoWriteConcernError } from "mongodb";
 import { getCollection } from "../database/mongo.js";
+import { COLECAO_HISTORICO } from "../scripts/seed-carga.js";
+
+// Pedido pago não pode ser perdido: só confirma ao cliente depois que a MAIORIA
+// dos nós do MongoDB gravou (e registrou no journal). wtimeout evita esperar para sempre.
+const WRITE_CONCERN_PEDIDO = { w: "majority" as const, wtimeout: 5000 };
 
 export class PedidosController {
   /**
@@ -133,49 +138,106 @@ export class PedidosController {
   }
 
   /**
-   * 5. CRIAR NOVO PEDIDO (Snapshot Histórico dos Itens)
+   * 5. CRIAR NOVO PEDIDO — ESCRITA CRÍTICA (Checkpoint 3, Módulo 10)
    * POST /api/pedidos
+   *
+   * O pedido pago é o dado que o RetroVault não pode perder: a gravação usa
+   * writeConcern { w: "majority" } explícito. Se a confirmação da maioria não
+   * chegar (MongoWriteConcernError), o pedido JÁ FOI gravado no primário: a
+   * rota responde 202 com o id e avisa para não reenviar (evita pedido duplicado).
    */
   static async criar(req: Request, res: Response): Promise<void> {
+    const { cliente_id, itens, entrega, valor_total } = req.body;
+
+    if (!cliente_id || !Array.isArray(itens) || itens.length === 0) {
+      res.status(400).json({ erro: "cliente_id e itens (array não vazio) são obrigatórios." });
+      return;
+    }
+
+    const itensFormatados = itens.map((item: any) => ({
+      jogo_id: ObjectId.isValid(item.jogo_id) ? new ObjectId(item.jogo_id) : item.jogo_id,
+      titulo: item.titulo,
+      plataforma: item.plataforma,
+      quantidade: Number(item.quantidade) || 1,
+      preco_unitario: Number(item.preco_unitario) || 0,
+    }));
+
+    // O _id é gerado aqui, ANTES de gravar: mesmo sem a confirmação da maioria,
+    // a API sabe qual é o número do pedido e pode devolvê-lo ao cliente.
+    const novoPedido = {
+      _id: new ObjectId(),
+      cliente_id: ObjectId.isValid(cliente_id) ? new ObjectId(cliente_id) : cliente_id,
+      itens: itensFormatados,
+      valor_total: Number(valor_total) || itensFormatados.reduce((acc: number, it: any) => acc + it.preco_unitario * it.quantidade, 0),
+      status: req.body.status || "pago",
+      data_pedido: new Date(),
+      entrega: entrega || {
+        endereco_completo: "Endereço cadastrado",
+        codigo_rastreio: null,
+        valor_frete: 15.0,
+      },
+    };
+
     try {
-      const { cliente_id, itens, entrega, valor_total } = req.body;
-
-      if (!cliente_id || !Array.isArray(itens) || itens.length === 0) {
-        res.status(400).json({ erro: "cliente_id e itens (array não vazio) são obrigatórios." });
-        return;
-      }
-
-      const itensFormatados = itens.map((item: any) => ({
-        jogo_id: ObjectId.isValid(item.jogo_id) ? new ObjectId(item.jogo_id) : item.jogo_id,
-        titulo: item.titulo,
-        plataforma: item.plataforma,
-        quantidade: Number(item.quantidade) || 1,
-        preco_unitario: Number(item.preco_unitario) || 0,
-      }));
-
-      const novoPedido = {
-        cliente_id: ObjectId.isValid(cliente_id) ? new ObjectId(cliente_id) : cliente_id,
-        itens: itensFormatados,
-        valor_total: Number(valor_total) || itensFormatados.reduce((acc: number, it: any) => acc + it.preco_unitario * it.quantidade, 0),
-        status: req.body.status || "pago",
-        data_pedido: new Date(),
-        entrega: entrega || {
-          endereco_completo: "Endereço cadastrado",
-          codigo_rastreio: null,
-          valor_frete: 15.0,
-        },
-      };
-
       const col = getCollection("pedidos");
-      const result = await col.insertOne(novoPedido);
+      const result = await col.insertOne(novoPedido, { writeConcern: WRITE_CONCERN_PEDIDO });
 
       res.status(201).json({
         mensagem: "Pedido registrado com sucesso!",
         id: result.insertedId,
+        gravado: true,
+        confirmacao: "maioria dos nós (writeConcern w: \"majority\")",
         pedido: novoPedido,
       });
     } catch (err: any) {
-      res.status(500).json({ erro: "Erro ao registrar pedido", detalhe: err.message });
+      if (err instanceof MongoWriteConcernError) {
+        // NÃO é "não gravou": o primário gravou, só não deu para esperar as cópias.
+        res.status(202).json({
+          mensagem: "Pedido gravado, aguardando a confirmação das cópias.",
+          id: novoPedido._id,
+          gravado: true,
+          confirmacao: "sem confirmação da maioria dentro de 5 s",
+          aviso: "Não reenvie o pedido: ele já foi gravado e seria duplicado. Consulte GET /api/pedidos/" + novoPedido._id,
+          detalhe: err.message,
+        });
+        return;
+      }
+      // Qualquer outra falha: o pedido NÃO foi gravado e o cliente pode tentar de novo.
+      res.status(503).json({
+        erro: "Não foi possível registrar o pedido agora (MongoDB indisponível). O pedido NÃO foi gravado; tente novamente.",
+        gravado: false,
+        detalhe: err.message,
+      });
+    }
+  }
+
+  /**
+   * 6. "MEUS PEDIDOS" — HISTÓRICO DO CLIENTE (Checkpoint 3, Módulo 11)
+   * GET /api/pedidos/historico/:cliente_id
+   *
+   * Os 10 pedidos mais recentes do cliente na coleção pedidos_historico
+   * (200 mil pedidos gravados por npm run seed:carga). É a consulta medida na
+   * Seção 4 do CHECKPOINT_3.md, com e sem o índice { cliente_id: 1, data_pedido: -1 }.
+   */
+  static async historicoCliente(req: Request, res: Response): Promise<void> {
+    const { cliente_id } = req.params;
+    if (!ObjectId.isValid(cliente_id)) {
+      res.status(400).json({ erro: "cliente_id inválido." });
+      return;
+    }
+    try {
+      const pedidos = await getCollection(COLECAO_HISTORICO)
+        .find(
+          { cliente_id: new ObjectId(cliente_id) },
+          { projection: { _id: 0, numero: 1, data_pedido: 1, status: 1, valor_total: 1, "itens.titulo": 1, "itens.plataforma": 1 } }
+        )
+        .sort({ data_pedido: -1 })
+        .limit(10)
+        .toArray();
+
+      res.json({ origem: "MONGODB", colecao: COLECAO_HISTORICO, cliente_id, total: pedidos.length, pedidos });
+    } catch (err: any) {
+      res.status(503).json({ erro: "Histórico de pedidos indisponível no momento (MongoDB).", detalhe: err.message });
     }
   }
 }

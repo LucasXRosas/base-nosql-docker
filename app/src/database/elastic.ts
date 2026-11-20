@@ -18,6 +18,14 @@ export function getElasticClient(): Client {
   return elasticClient;
 }
 
+/**
+ * Checkpoint 3 (Módulo 10): opções para as chamadas feitas DENTRO de uma requisição
+ * do usuário. Sem novas tentativas e com tempo curto, a queda do ElasticSearch é
+ * percebida rápido e a rota segue o plano B (busca no MongoDB ou pendência no Redis).
+ */
+export const LIMITE_ELASTIC_MS = 1500;
+export const OPCOES_ELASTIC_RAPIDAS = { requestTimeout: LIMITE_ELASTIC_MS, maxRetries: 0 };
+
 export async function connectElastic(): Promise<Client> {
   const client = getElasticClient();
   try {

@@ -1,0 +1,66 @@
+{
+  "_comentario": "Coordenadas FICTÍCIAS em Guarapuava-PR. Formato: [longitude, latitude] — a mesma ordem do GeoJSON (MongoDB) e do GEOADD (Redis). Carregado por npm run seed:geo (chamado pelo iniciar.sh).",
+  "lojas": [
+    {
+      "codigo": "LJ-CENTRO",
+      "nome": "RetroVault Centro (loja-sede)",
+      "tipo": "loja_propria",
+      "endereco": "Rua XV de Novembro, 1200 - Centro",
+      "servicos": ["retirada", "avaliacao_usados", "troca"],
+      "horario": "Seg-Sáb 9h-19h",
+      "coordenadas": [-51.4602, -25.3921]
+    },
+    {
+      "codigo": "LJ-SHOPPING",
+      "nome": "Ponto de Retirada Shopping",
+      "tipo": "ponto_retirada",
+      "endereco": "Rua Saldanha Marinho, 800 - Centro",
+      "servicos": ["retirada"],
+      "horario": "Todos os dias 10h-22h",
+      "coordenadas": [-51.4540, -25.3975]
+    },
+    {
+      "codigo": "LJ-TRIANON",
+      "nome": "Parceiro Game Point Trianon",
+      "tipo": "parceiro",
+      "endereco": "Rua Padre Chagas, 450 - Trianon",
+      "servicos": ["retirada", "avaliacao_usados"],
+      "horario": "Seg-Sex 10h-18h",
+      "coordenadas": [-51.4685, -25.3880]
+    },
+    {
+      "codigo": "LJ-BATEL",
+      "nome": "Sebo Gamer Batel",
+      "tipo": "parceiro",
+      "endereco": "Rua Guaíra, 3100 - Batel",
+      "servicos": ["avaliacao_usados", "troca"],
+      "horario": "Ter-Sáb 13h-20h",
+      "coordenadas": [-51.4710, -25.4030]
+    },
+    {
+      "codigo": "LJ-CAMPUS",
+      "nome": "Ponto de Retirada Campus Universitário",
+      "tipo": "ponto_retirada",
+      "endereco": "Av. Prof. Laura Pacheco Bastos, 800 - Industrial",
+      "servicos": ["retirada"],
+      "horario": "Seg-Sex 8h-22h",
+      "coordenadas": [-51.4920, -25.3800]
+    },
+    {
+      "codigo": "LJ-PRIMAVERA",
+      "nome": "Retro Arcade Primavera",
+      "tipo": "parceiro",
+      "endereco": "Rua Xavier da Silva, 2500 - Primavera",
+      "servicos": ["retirada", "avaliacao_usados"],
+      "horario": "Seg-Sáb 9h-18h",
+      "coordenadas": [-51.4400, -25.4150]
+    }
+  ],
+  "entregadores": {
+    "Rafael": [-51.4598, -25.3925],
+    "Bianca": [-51.4560, -25.3960],
+    "Tiago": [-51.4700, -25.3900],
+    "Marina": [-51.4850, -25.3820],
+    "Otavio": [-51.4380, -25.4170]
+  }
+}

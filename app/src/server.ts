@@ -22,7 +22,14 @@ app.get("/", (req: Request, res: Response) => {
     disciplina: "Banco de Dados NoSQL (TSI34E-TSI4)",
     professor: "Prof. Marcelo Vichar",
     autor: "Lucas Rosa",
-    checkpoint: "Checkpoint 1",
+    checkpoint: "Checkpoint 3",
+    endpoints_checkpoint_3: {
+      lojas_perto_de_mim: "GET /api/perto/lojas?lat=-25.3935&lon=-51.4590&raio_km=1",
+      entregadores_perto: "GET /api/perto/entregadores?loja=LJ-CENTRO&raio_km=1",
+      mover_entregador: "PATCH /api/perto/entregadores/:nome",
+      pedido_escrita_critica: "POST /api/pedidos (writeConcern majority)",
+      meus_pedidos_historico: "GET /api/pedidos/historico/:cliente_id",
+    },
     endpoints_checkpoint_1: {
       destaques_bem_avaliados: "GET /api/jogos/destaques",
       promocoes_midias: "GET /api/jogos/promocoes",

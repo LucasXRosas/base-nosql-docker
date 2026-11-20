@@ -7,6 +7,9 @@ const router = Router();
 router.get("/expedicao", PedidosController.filaExpedicao);
 router.patch("/:id/status", PedidosController.atualizarStatus);
 
+// Checkpoint 3 (Módulo 11): "Meus pedidos" — rota medida no explain() e no benchmark
+router.get("/historico/:cliente_id", PedidosController.historicoCliente);
+
 // Rotas gerais de CRUD e detalhes
 router.get("/", PedidosController.listar);
 router.get("/:id", PedidosController.obterPorId);

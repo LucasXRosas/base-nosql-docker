@@ -5,6 +5,7 @@ import categoriasRoutes from "./categorias.routes.js";
 import clientesRoutes from "./clientes.routes.js";
 import redisRoutes from "./redis.routes.js";
 import buscaRoutes from "./busca.routes.js";
+import pertoRoutes from "./perto.routes.js";
 import { getDb } from "../database/mongo.js";
 import { getRedisClient } from "../database/redis.js";
 import { getElasticClient } from "../database/elastic.js";
@@ -60,5 +61,6 @@ routes.use("/categorias", categoriasRoutes);
 routes.use("/clientes", clientesRoutes);
 routes.use("/redis", redisRoutes);
 routes.use("/busca", buscaRoutes);
+routes.use("/perto", pertoRoutes); // Checkpoint 3 — localização
 
 export default routes;

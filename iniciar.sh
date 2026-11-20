@@ -57,6 +57,27 @@ if [[ -f "$SCRIPT_DIR/init/redis-init.commands" ]]; then
     done
 fi
 
+# ── Checkpoint 3: coordenadas (2dsphere + Redis GEO) e carga de teste com índice ─
+# seed:geo   → lojas com GeoJSON + índice 2dsphere (MongoDB) e motoboys (Redis GEOADD)
+# seed:carga → 200 mil pedidos em pedidos_historico + índice { cliente_id: 1, data_pedido: -1 }
+#              (na primeira vez leva alguns segundos; depois só garante o índice)
+echo -e "${CYAN}Carregando coordenadas e a carga de teste (Checkpoint 3)...${NC}"
+GEO_OK=0
+for i in {1..40}; do
+    if docker exec nosql_app npm run seed:geo >/dev/null 2>&1 \
+        && docker exec nosql_app npm run seed:carga >/dev/null 2>&1; then
+        GEO_OK=1
+        break
+    fi
+    sleep 3
+done
+if [[ "$GEO_OK" == "1" ]]; then
+    echo -e "${GREEN}Coordenadas, índice 2dsphere, carga de teste e índice de desempenho prontos.${NC}"
+else
+    echo -e "${YELLOW}[AVISO] Não foi possível carregar coordenadas/carga agora. Com o ambiente no ar, rode:${NC}"
+    echo -e "${YELLOW}        docker exec nosql_app npm run seed:geo && docker exec nosql_app npm run seed:carga${NC}"
+fi
+
 # ── Criar o índice de busca no Elasticsearch a partir de init/elastic-init.json ─
 echo -e "${CYAN}Aguardando o Elasticsearch para criar o índice de busca...${NC}"
 INDICE_OK=0
@@ -83,6 +104,7 @@ echo -e "║  ${BOLD}APLICAÇÃO NODE/TYPESCRIPT (DOCKER):${NC}                 
 echo -e "║  • API Express (Hot-Reload):       ${CYAN}http://localhost:3400${NC}          ║"
 echo -e "║  • Health Check dos 3 bancos:      ${CYAN}http://localhost:3400/api/health${NC} ║"
 echo -e "║  • Catálogo de Jogos (GET):        ${CYAN}http://localhost:3400/api/jogos${NC}  ║"
+echo -e "║  • Lojas perto de mim (CP3):       ${CYAN}/api/perto/lojas?lat=..&lon=..${NC} ║"
 echo -e "${GREEN}╠══════════════════════════════════════════════════════════════════╣${NC}"
 echo -e "║  ${BOLD}INTERFACES VISUAIS (WEB):${NC}                                      ║"
 echo -e "║  • ElasticVue (Elasticsearch):     ${CYAN}http://localhost:8400${NC} (Use http://localhost:9234) ║"

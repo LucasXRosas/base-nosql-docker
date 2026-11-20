@@ -2,8 +2,16 @@ import { Request, Response } from "express";
 import { ObjectId } from "mongodb";
 import { performance } from "perf_hooks";
 import { getCollection } from "../database/mongo.js";
-import { cacheGet, cacheSet, cacheDelMany, cacheIncr, getRedisClient } from "../database/redis.js";
-import { getElasticClient } from "../database/elastic.js";
+import {
+  cacheIncr,
+  getRedisClient,
+  cacheLerSeguro,
+  cacheGravarSeguro,
+  cacheInvalidarSeguro,
+  comLimite,
+  redisPronto,
+} from "../database/redis.js";
+import { getElasticClient, OPCOES_ELASTIC_RAPIDAS, LIMITE_ELASTIC_MS } from "../database/elastic.js";
 import { seedElasticsearch } from "../scripts/seed-elastic.js";
 
 const CACHE_KEY_DESTAQUES = "retrovault:jogos:destaques";
@@ -11,6 +19,28 @@ const CACHE_KEY_PROMOCOES = "retrovault:jogos:promocoes";
 const CACHE_PREFIX_SKU = "retrovault:jogos:sku:";
 const CACHE_PREFIX_VIEWS = "retrovault:views:";
 const KEY_SYNC_PENDENTES = "retrovault:sync:pendentes";
+
+// Origem da resposta de uma leitura com cache (Checkpoint 3: o cache é opcional)
+const ORIGEM_HIT = "REDIS (CACHE HIT)";
+const ORIGEM_MISS = "MONGODB (CACHE MISS)";
+const ORIGEM_SEM_REDIS = "MONGODB (REDIS FORA DO AR, SEM CACHE)";
+
+function origemLeitura(redisNoAr: boolean) {
+  return redisNoAr
+    ? { origem: ORIGEM_MISS, xCache: "MISS" }
+    : { origem: ORIGEM_SEM_REDIS, xCache: "BYPASS" };
+}
+
+/**
+ * Só chega aqui se o MongoDB — a fonte da verdade — falhar: sem ele não há
+ * resposta correta para dar, então a rota devolve 503 com mensagem clara.
+ */
+function responderMongoIndisponivel(res: Response, err: any, contexto: string) {
+  res.status(503).json({
+    erro: `${contexto} indisponível no momento: o banco principal (MongoDB) não respondeu. Tente novamente em instantes.`,
+    detalhe: err.message,
+  });
+}
 
 /**
  * Helper para buscar jogo por SKU ou Título (case-insensitive substring)
@@ -39,7 +69,7 @@ async function indexarJogoNoElastic(jogo: any): Promise<void> {
     if (cat) catNome = cat.nome;
   }
 
-  await elastic.index({
+  await comLimite(elastic.index({
     index: "jogos",
     id: jogo._id.toString(),
     document: {
@@ -58,7 +88,7 @@ async function indexarJogoNoElastic(jogo: any): Promise<void> {
       media_nota: jogo.avaliacoes_resumo?.media_nota || 0,
     },
     refresh: true, // Torna visível imediatamente para novas buscas
-  });
+  }, OPCOES_ELASTIC_RAPIDAS), LIMITE_ELASTIC_MS); // CP3: falha rápido e cai na pendência
 }
 
 export class JogosController {
@@ -98,12 +128,12 @@ export class JogosController {
   static async listarDestaques(req: Request, res: Response): Promise<void> {
     const t0 = performance.now();
     try {
-      const cached = await cacheGet<any[]>(CACHE_KEY_DESTAQUES);
+      const { valor: cached, redisNoAr } = await cacheLerSeguro<any[]>(CACHE_KEY_DESTAQUES);
       if (cached) {
         const duracao = (performance.now() - t0).toFixed(2);
         res.setHeader("X-Cache", "HIT");
         res.json({
-          origem: "REDIS (CACHE HIT)",
+          origem: ORIGEM_HIT,
           tempo_resposta: `${duracao} ms`,
           total_itens: cached.length,
           total: cached.length,
@@ -120,13 +150,14 @@ export class JogosController {
         .limit(5)
         .toArray();
 
-      // Salva no Redis com TTL de 120 segundos
-      await cacheSet(CACHE_KEY_DESTAQUES, jogos, 120);
+      // Salva no Redis com TTL de 120 segundos (se o Redis estiver no ar)
+      if (redisNoAr) await cacheGravarSeguro(CACHE_KEY_DESTAQUES, jogos, 120);
 
+      const { origem, xCache } = origemLeitura(redisNoAr);
       const duracao = (performance.now() - t0).toFixed(2);
-      res.setHeader("X-Cache", "MISS");
+      res.setHeader("X-Cache", xCache);
       res.json({
-        origem: "MONGODB (CACHE MISS)",
+        origem,
         tempo_resposta: `${duracao} ms`,
         total_itens: jogos.length,
         total: jogos.length,
@@ -134,7 +165,7 @@ export class JogosController {
         dados: jogos,
       });
     } catch (err: any) {
-      res.status(500).json({ erro: "Erro ao listar destaques", detalhe: err.message });
+      responderMongoIndisponivel(res, err, "A vitrine de destaques está");
     }
   }
 
@@ -146,12 +177,12 @@ export class JogosController {
   static async listarPromocoes(req: Request, res: Response): Promise<void> {
     const t0 = performance.now();
     try {
-      const cached = await cacheGet<any[]>(CACHE_KEY_PROMOCOES);
+      const { valor: cached, redisNoAr } = await cacheLerSeguro<any[]>(CACHE_KEY_PROMOCOES);
       if (cached) {
         const duracao = (performance.now() - t0).toFixed(2);
         res.setHeader("X-Cache", "HIT");
         res.json({
-          origem: "REDIS (CACHE HIT)",
+          origem: ORIGEM_HIT,
           tempo_resposta: `${duracao} ms`,
           total_itens: cached.length,
           total: cached.length,
@@ -167,13 +198,14 @@ export class JogosController {
         .sort({ preco: 1 })
         .toArray();
 
-      // Salva no Redis com TTL de 60 segundos
-      await cacheSet(CACHE_KEY_PROMOCOES, promocoes, 60);
+      // Salva no Redis com TTL de 60 segundos (se o Redis estiver no ar)
+      if (redisNoAr) await cacheGravarSeguro(CACHE_KEY_PROMOCOES, promocoes, 60);
 
+      const { origem, xCache } = origemLeitura(redisNoAr);
       const duracao = (performance.now() - t0).toFixed(2);
-      res.setHeader("X-Cache", "MISS");
+      res.setHeader("X-Cache", xCache);
       res.json({
-        origem: "MONGODB (CACHE MISS)",
+        origem,
         tempo_resposta: `${duracao} ms`,
         total_itens: promocoes.length,
         total: promocoes.length,
@@ -181,7 +213,7 @@ export class JogosController {
         dados: promocoes,
       });
     } catch (err: any) {
-      res.status(500).json({ erro: "Erro ao listar promoções", detalhe: err.message });
+      responderMongoIndisponivel(res, err, "A lista de promoções está");
     }
   }
 
@@ -205,12 +237,15 @@ export class JogosController {
       const strMongo = `${jogoMongo.titulo} · R$ ${Number(jogoMongo.preco).toFixed(2)}`;
 
       // 2. Redis (Cache em memória)
-      const cachedRedis = (await cacheGet<any>(`${CACHE_PREFIX_SKU}${jogoMongo.sku}`)) ||
-                          (await cacheGet<any>(`${CACHE_PREFIX_SKU}${jogoMongo.titulo}`));
+      const porSku = await cacheLerSeguro<any>(`${CACHE_PREFIX_SKU}${jogoMongo.sku}`);
+      const cachedRedis = porSku.valor ||
+        (porSku.redisNoAr ? (await cacheLerSeguro<any>(`${CACHE_PREFIX_SKU}${jogoMongo.titulo}`)).valor : null);
 
-      const strRedis = cachedRedis
-        ? `${cachedRedis.titulo || jogoMongo.titulo} · R$ ${Number(cachedRedis.preco).toFixed(2)}`
-        : "(sem cópia)";
+      const strRedis = !porSku.redisNoAr
+        ? "(Redis fora do ar)"
+        : cachedRedis
+          ? `${cachedRedis.titulo || jogoMongo.titulo} · R$ ${Number(cachedRedis.preco).toFixed(2)}`
+          : "(sem cópia)";
 
       // 3. ElasticSearch (Índice de busca textual)
       let strElastic = "(sem cópia)";
@@ -310,8 +345,8 @@ export class JogosController {
         return;
       }
 
-      // Invalida cache no Redis
-      await cacheDelMany([
+      // Invalida cache no Redis (se estiver fora do ar, as cópias expiram pelo TTL)
+      const redisInvalidado = await cacheInvalidarSeguro([
         CACHE_KEY_PROMOCOES,
         CACHE_KEY_DESTAQUES,
         `${CACHE_PREFIX_SKU}${jogoAtualizado.sku}`,
@@ -324,7 +359,7 @@ export class JogosController {
       res.json({
         mongodb: "gravado",
         documentos_indexados: totalIndexados,
-        redis: "invalidado",
+        redis: redisInvalidado ? "invalidado" : "não invalidado (Redis fora do ar; cópias expiram pelo TTL)",
         aviso: "Reindexação total concluída (custo elevado: reindexou todos os itens para alterar apenas um).",
       });
     } catch (err: any) {
@@ -372,7 +407,11 @@ export class JogosController {
         `${CACHE_PREFIX_SKU}${jogoAtualizado.sku}`,
         `${CACHE_PREFIX_SKU}${jogoAtualizado.titulo}`,
       ];
-      await cacheDelMany(chavesInvalidar);
+      // Se o Redis estiver fora do ar, a escrita segue: as cópias expiram pelo TTL (no máximo 5 min).
+      const redisInvalidado = await cacheInvalidarSeguro(chavesInvalidar);
+      const statusRedis = redisInvalidado
+        ? "invalidado"
+        : "não invalidado (Redis fora do ar; cópias expiram pelo TTL)";
 
       // 3. ElasticSearch: Atualiza APENAS aquele documento.
       // Qualquer falha (real ou simulada via ?simular_falha=elastic) cai no mesmo
@@ -394,7 +433,8 @@ export class JogosController {
         });
 
         try {
-          await getRedisClient().rpush(KEY_SYNC_PENDENTES, payloadPendencia);
+          if (!redisPronto()) throw new Error("Redis fora do ar");
+          await comLimite(getRedisClient().rpush(KEY_SYNC_PENDENTES, payloadPendencia), 1000);
         } catch (errRedis: any) {
           // Nem o ElasticSearch nem a fila de pendências estão disponíveis.
           res.status(500).json({
@@ -408,7 +448,7 @@ export class JogosController {
 
         res.status(202).json({
           mongodb: "gravado",
-          redis: "invalidado",
+          redis: statusRedis,
           elasticsearch: "falhou (ElasticSearch fora do ar); pendência registrada",
           motivo: errElastic.message,
           chave_pendencias: KEY_SYNC_PENDENTES,
@@ -418,7 +458,7 @@ export class JogosController {
 
       res.json({
         mongodb: "gravado",
-        redis: "invalidado",
+        redis: statusRedis,
         elasticsearch: "atualizado (1 documento)",
       });
     } catch (err: any) {
@@ -535,7 +575,10 @@ export class JogosController {
    */
   static async limparCache(req: Request, res: Response): Promise<void> {
     try {
-      await cacheDelMany([CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES]);
+      if (!(await cacheInvalidarSeguro([CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES]))) {
+        res.status(503).json({ erro: "Redis fora do ar: não há cache para invalidar agora." });
+        return;
+      }
       res.json({
         mensagem: "Cache das consultas de jogos invalidado com sucesso!",
         cache_invalidado: true,
@@ -619,17 +662,15 @@ export class JogosController {
     const t0 = performance.now();
     try {
       const { sku: param } = req.params;
-      const col = getCollection("jogos");
 
-      // Tenta recuperar do cache Redis pelo parâmetro direto
-      const cacheKey = `${CACHE_PREFIX_SKU}${param}`;
-      const cached = await cacheGet<any>(cacheKey);
+      // Tenta recuperar do cache Redis pelo parâmetro direto (sem esperar um Redis fora do ar)
+      const { valor: cached, redisNoAr } = await cacheLerSeguro<any>(`${CACHE_PREFIX_SKU}${param}`);
 
       if (cached) {
         const duracao = (performance.now() - t0).toFixed(2);
         res.setHeader("X-Cache", "HIT");
         res.json({
-          origem: "REDIS (CACHE HIT)",
+          origem: ORIGEM_HIT,
           tempo_resposta: `${duracao} ms`,
           jogo: cached,
         });
@@ -637,6 +678,7 @@ export class JogosController {
       }
 
       // Busca no MongoDB por SKU ou por Título
+      const col = getCollection("jogos");
       const jogo = await col.findOne(buildJogoQuery(param));
 
       if (!jogo) {
@@ -644,21 +686,24 @@ export class JogosController {
         return;
       }
 
-      // Salva no cache com TTL de 300s (5 minutos)
-      await cacheSet(`${CACHE_PREFIX_SKU}${jogo.sku}`, jogo, 300);
-      if (jogo.titulo !== jogo.sku) {
-        await cacheSet(`${CACHE_PREFIX_SKU}${jogo.titulo}`, jogo, 300);
+      // Salva no cache com TTL de 300s (5 minutos), se o Redis estiver no ar
+      if (redisNoAr) {
+        await cacheGravarSeguro(`${CACHE_PREFIX_SKU}${jogo.sku}`, jogo, 300);
+        if (jogo.titulo !== jogo.sku) {
+          await cacheGravarSeguro(`${CACHE_PREFIX_SKU}${jogo.titulo}`, jogo, 300);
+        }
       }
 
+      const { origem, xCache } = origemLeitura(redisNoAr);
       const duracao = (performance.now() - t0).toFixed(2);
-      res.setHeader("X-Cache", "MISS");
+      res.setHeader("X-Cache", xCache);
       res.json({
-        origem: "MONGODB (CACHE MISS)",
+        origem,
         tempo_resposta: `${duracao} ms`,
         jogo,
       });
     } catch (err: any) {
-      res.status(500).json({ erro: "Erro ao buscar jogo", detalhe: err.message });
+      responderMongoIndisponivel(res, err, "O catálogo está");
     }
   }
 
@@ -705,8 +750,8 @@ export class JogosController {
 
       const result = await col.insertOne(novoJogo);
 
-      // Invalida cache das listas para incluir o novo produto
-      await cacheDelMany([CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES]);
+      // Invalida cache das listas para incluir o novo produto (se o Redis estiver no ar)
+      const redisInvalidado = await cacheInvalidarSeguro([CACHE_KEY_PROMOCOES, CACHE_KEY_DESTAQUES]);
 
       // Sincroniza novo jogo no ElasticSearch
       let elasticStatus = "NÃO_APLICADO";
@@ -719,7 +764,7 @@ export class JogosController {
           if (cat) catNome = cat.nome;
         }
 
-        await elastic.index({
+        await comLimite(elastic.index({
           index: "jogos",
           id: result.insertedId.toString(),
           document: {
@@ -738,7 +783,7 @@ export class JogosController {
             media_nota: novoJogo.avaliacoes_resumo?.media_nota || 0,
           },
           refresh: true,
-        });
+        }, OPCOES_ELASTIC_RAPIDAS), LIMITE_ELASTIC_MS);
         elasticStatus = "INDEXADO COM SUCESSO (REFRESH IMEDIATO)";
       } catch (elasticErr: any) {
         console.error(`[Elasticsearch] Falha na indexação do novo jogo ${sku}:`, elasticErr.message);
@@ -751,7 +796,7 @@ export class JogosController {
         jogo: novoJogo,
         sincronizacao: {
           mongodb: "INSERIDO (FONTE DA VERDADE)",
-          redis: "CACHE DAS LISTAS INVALIDADO",
+          redis: redisInvalidado ? "CACHE DAS LISTAS INVALIDADO" : "REDIS FORA DO AR (LISTAS EXPIRAM PELO TTL)",
           elasticsearch: elasticStatus,
         },
       });
