@@ -1,4 +1,4 @@
-# ⚡ Roteiro de Demonstração Prática — Módulo 11: Performance e Otimização (RetroVault)
+# Roteiro de Demonstração Prática — Módulo 11: Performance e Otimização (RetroVault)
 
 A pergunta da aula: **a tela "Meus pedidos" do RetroVault está lenta. Por quê, e o que realmente resolve?**
 
@@ -11,7 +11,7 @@ O código está em `app/src/controllers/pedidos.controller.ts` (`historicoClient
 
 ---
 
-## ⚙️ Preparação
+## Preparação
 
 ```bash
 ./iniciar.sh
@@ -34,7 +34,7 @@ docker exec -it nosql_mongo mongosh -u root -p root --authenticationDatabase adm
 
 ---
 
-## 🧪 Experimento 1 — O histórico de pedidos
+## Experimento 1 — O histórico de pedidos
 
 ```js
 db.pedidos_historico.countDocuments();
@@ -63,7 +63,7 @@ O cliente dos exemplos é o **Lucas Rosa** (`65f8c0009f1b2c001c8e5001`), com 227
 
 ---
 
-## 🧪 Experimento 2 — Sem índice: o banco lê tudo
+## Experimento 2 — Sem índice: o banco lê tudo
 
 A tela "Meus pedidos" mostra os 10 pedidos mais recentes do cliente:
 
@@ -94,7 +94,7 @@ tempo       67 ms
 
 ---
 
-## 🧪 Experimento 3 — O índice simples e o composto
+## Experimento 3 — O índice simples e o composto
 
 ```js
 db.pedidos_historico.createIndex({ cliente_id: 1 })
@@ -129,7 +129,7 @@ Os pedidos do Lucas já estão em ordem de data dentro do índice: o banco exami
 
 ---
 
-## 🧪 Experimento 4 — O índice que não serve
+## Experimento 4 — O índice que não serve
 
 Com o índice `{ cliente_id: 1, data_pedido: -1 }` criado, um relatório interno de devoluções de uma plataforma:
 
@@ -151,7 +151,7 @@ Para ver os índices da coleção: `db.pedidos_historico.getIndexes()`.
 
 ---
 
-## 🧪 Experimento 5 — O custo do índice na escrita
+## Experimento 5 — O custo do índice na escrita
 
 ```js
 // Os mesmos 50 mil pedidos, gravados em duas coleções:
@@ -180,7 +180,7 @@ Com seis índices, gravar os mesmos 50 mil pedidos levou quase o dobro do tempo 
 
 ---
 
-## 🧪 Experimento 6 — O benchmark da API
+## Experimento 6 — O benchmark da API
 
 O script de benchmark dispara várias requisições, algumas ao mesmo tempo, e mostra a vazão (requisições por segundo) e a latência (média, p50, p95 e p99). Argumentos: URL, total de requisições e quantas ao mesmo tempo.
 
@@ -219,7 +219,7 @@ latência     média 7.4 ms
 
 ---
 
-## 📌 Resumo
+## Resumo
 
 1. **Medir antes de mexer:** latência (p50, p95, p99) e vazão.
 2. **Encontrar a etapa lenta:** `explain()`; desconfie de `COLLSCAN` e de muitos examinados para poucos devolvidos.

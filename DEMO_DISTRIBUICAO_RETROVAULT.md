@@ -1,4 +1,4 @@
-# 🌐 Roteiro de Demonstração Prática — Módulo 10: Escalabilidade e Distribuição (RetroVault)
+# Roteiro de Demonstração Prática — Módulo 10: Escalabilidade e Distribuição (RetroVault)
 
 A pergunta da aula: **o que acontece com os pedidos do RetroVault quando um servidor cai ou a rede falha?**
 
@@ -13,7 +13,7 @@ A pergunta da aula: **o que acontece com os pedidos do RetroVault quando um serv
 
 ---
 
-## ⚙️ Preparação
+## Preparação
 
 ```bash
 ./iniciar.sh            # ambiente de sempre (o ElasticSearch é usado no experimento 6, a API no 8)
@@ -31,7 +31,7 @@ Para abrir o `mongosh` em um nó: `docker exec -it nosql_mongo_a mongosh` (ou `_
 
 ---
 
-## 🧪 Experimento 1 — Quem é quem (MongoDB)
+## Experimento 1 — Quem é quem (MongoDB)
 
 No `mongo-a`:
 
@@ -73,7 +73,7 @@ Só o primário aceita escritas; as cópias servem leitura.
 
 ---
 
-## 🧪 Experimento 2 — O primário caiu
+## Experimento 2 — O primário caiu
 
 ```bash
 docker stop nosql_mongo_a
@@ -91,7 +91,7 @@ Com 2 de 3 nós de pé, a maioria elegeu um novo primário. O pedido 1001, grava
 
 ---
 
-## 🧪 Experimento 3 — Esperar quantas cópias?
+## Experimento 3 — Esperar quantas cópias?
 
 Ainda com o `mongo-a` fora do ar, no `mongo-b`:
 
@@ -117,7 +117,7 @@ Volte o nó: `docker start nosql_mongo_a`. Em alguns segundos ele copia o que pe
 
 ---
 
-## 🧪 Experimento 4 — A rede partiu
+## Experimento 4 — A rede partiu
 
 ```bash
 docker network disconnect nosql_distribuido nosql_mongo_a
@@ -148,7 +148,7 @@ docker network connect nosql_distribuido nosql_mongo_a
 
 ---
 
-## 🧪 Experimento 5 — Redis com réplica
+## Experimento 5 — Redis com réplica
 
 ```bash
 docker exec nosql_redis_principal redis-cli SET retrovault:pedido:1001:status "enviado"
@@ -183,7 +183,7 @@ O `SET` respondeu OK sem nenhuma cópia (`WAIT` devolveu 0): o Redis prefere res
 
 ---
 
-## 🧪 Experimento 6 — Shards no ElasticSearch
+## Experimento 6 — Shards no ElasticSearch
 
 No ElasticVue (<http://localhost:8400>) ou com `curl` na porta 9234:
 
@@ -217,7 +217,7 @@ Ao terminar: `curl -s -X DELETE http://localhost:9234/pedidos-teste`.
 
 ---
 
-## 🧪 Experimento 7 — Sharding: a chave decide o equilíbrio
+## Experimento 7 — Sharding: a chave decide o equilíbrio
 
 ```bash
 ./distribuido.sh sharding
@@ -303,7 +303,7 @@ Ao terminar: `./distribuido.sh parar`.
 
 ---
 
-## 🧪 Experimento 8 — A API do RetroVault continua no ar quando um banco cai
+## Experimento 8 — A API do RetroVault continua no ar quando um banco cai
 
 No RetroVault, as **próprias rotas do Checkpoint 2** ficaram resilientes (não há rotas paralelas). Com todos os bancos no ar:
 
@@ -347,7 +347,7 @@ O roteiro completo, com todas as rotas e a escrita crítica, está no [`CHECKPOI
 
 ---
 
-## 📌 Resumo
+## Resumo
 
 | Banco | Como copia | Como divide | Na falha, prefere | No RetroVault |
 | :--- | :--- | :--- | :--- | :--- |

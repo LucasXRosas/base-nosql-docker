@@ -1,4 +1,4 @@
-# 🔄 Roteiro de Demonstração Prática — Módulo 08: Integração entre Bancos e Sincronização (RetroVault)
+# Roteiro de Demonstração Prática — Módulo 08: Integração entre Bancos e Sincronização (RetroVault)
 
 Este roteiro mostra, no RetroVault, o que acontece quando o mesmo jogo está gravado em três bancos:
 
@@ -13,7 +13,7 @@ O código está em `app/src/controllers/jogos.controller.ts` e as rotas em `app/
 
 ---
 
-## ⚙️ Preparação
+## Preparação
 
 ```bash
 ./iniciar.sh
@@ -33,7 +33,7 @@ Os exemplos usam o jogo **God of War (PlayStation Hits)**, SKU `GAME-PS4-GOW-010
 
 ---
 
-## 🧪 Experimento 1 — Um jogo, três cópias
+## Experimento 1 — Um jogo, três cópias
 
 ```bash
 curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" | jq .origem
@@ -57,7 +57,7 @@ curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/comparar" | jq .
 
 ---
 
-## 🧪 Experimento 2 — Alterando só o MongoDB
+## Experimento 2 — Alterando só o MongoDB
 
 ```bash
 curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/sem-sincronizar" \
@@ -84,7 +84,7 @@ curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" \
 
 ---
 
-## 🧪 Experimento 3 — Reindexação total
+## Experimento 3 — Reindexação total
 
 ```bash
 curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/reindexando-tudo" \
@@ -104,7 +104,7 @@ curl -s -X PATCH "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/reindexando-t
 
 ---
 
-## 🧪 Experimento 4 — Escrita sincronizada
+## Experimento 4 — Escrita sincronizada
 
 ```bash
 curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010" > /dev/null   # recria o cache
@@ -139,7 +139,7 @@ A ordem dos passos no método `atualizarSincronizado`:
 
 ---
 
-## 🧪 Experimento 5 — Falha do ElasticSearch e pendência
+## Experimento 5 — Falha do ElasticSearch e pendência
 
 O parâmetro `?simular_falha=elastic` lança um erro no lugar da chamada ao ElasticSearch. Uma falha real (`docker stop nosql_elasticsearch`) segue exatamente o mesmo caminho de código, detectada em até 1,5 s.
 
@@ -171,7 +171,7 @@ curl -s "http://localhost:3400/api/jogos/sincronizacao/pendentes" | jq '{total_p
 
 ---
 
-## 🧪 Experimento 6 — Reprocessamento
+## Experimento 6 — Reprocessamento
 
 ```bash
 curl -s -X POST "http://localhost:3400/api/jogos/sincronizacao/reprocessar" | jq .
@@ -199,7 +199,7 @@ curl -s "http://localhost:3400/api/jogos/GAME-PS4-GOW-010/comparar" | jq .
 
 ---
 
-## 📌 Resumo
+## Resumo
 
 - Cada dado tem **um** banco com a palavra final (MongoDB) e cópias (Redis e ElasticSearch).
 - Toda escrita segue a ordem: MongoDB, invalidar o cache, atualizar só o documento alterado no índice.

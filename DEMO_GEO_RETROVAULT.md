@@ -1,4 +1,4 @@
-# 📍 Roteiro de Demonstração Prática — Módulo 09: Dados Geográficos (RetroVault)
+# Roteiro de Demonstração Prática — Módulo 09: Dados Geográficos (RetroVault)
 
 A pergunta da aula: **"o que está perto de mim?"**, no RetroVault.
 
@@ -13,7 +13,7 @@ O código está em `app/src/controllers/perto.controller.ts` e as coordenadas, f
 
 ---
 
-## ⚙️ Preparação
+## Preparação
 
 ```bash
 ./iniciar.sh
@@ -30,7 +30,7 @@ As rotas recebem a posição de quem pergunta em `?lat=&lon=`. Nos exemplos, é 
 
 ---
 
-## 🧪 Experimento 1 — Lojas a até 1 km e a até 3 km (MongoDB)
+## Experimento 1 — Lojas a até 1 km e a até 3 km (MongoDB)
 
 ```bash
 curl -s "http://localhost:3400/api/perto/lojas?lat=-25.3935&lon=-51.4590&raio_km=1" | jq '{origem, total, lojas: [.lojas[] | {codigo, distancia_km}]}'
@@ -64,7 +64,7 @@ db.lojas.find({ localizacao: { $near: {
 
 ---
 
-## 🧪 Experimento 2 — Só onde dá para avaliar jogos usados
+## Experimento 2 — Só onde dá para avaliar jogos usados
 
 ```bash
 curl -s "http://localhost:3400/api/perto/lojas?lat=-25.3935&lon=-51.4590&raio_km=3&servico=avaliacao_usados" | jq -c '[.lojas[] | {codigo, distancia_km}]'
@@ -78,7 +78,7 @@ curl -s "http://localhost:3400/api/perto/lojas?lat=-25.3935&lon=-51.4590&raio_km
 
 ---
 
-## 🧪 Experimento 3 — Motoboys perto da loja-sede (Redis)
+## Experimento 3 — Motoboys perto da loja-sede (Redis)
 
 ```bash
 curl -s "http://localhost:3400/api/perto/entregadores?loja=LJ-CENTRO&raio_km=1" | jq -c '{origem, total, entregadores}'
@@ -99,7 +99,7 @@ TYPE retrovault:geo:entregadores
 
 ---
 
-## 🧪 Experimento 4 — O motoboy andou (Redis)
+## Experimento 4 — O motoboy andou (Redis)
 
 ```bash
 curl -s -X PATCH "http://localhost:3400/api/perto/entregadores/Tiago" \
@@ -118,7 +118,7 @@ Para voltar às posições iniciais: `docker exec nosql_app npm run seed:geo`.
 
 ---
 
-## 📌 Resumo
+## Resumo
 
 - Separe o que **fica parado** (lojas: MongoDB, fonte da verdade) do que **se move** (motoboys: Redis).
 - MongoDB: campo GeoJSON `{ type: "Point", coordinates: [lon, lat] }`, índice `2dsphere` e `$near` com `$maxDistance` em metros.
